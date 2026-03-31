@@ -1,96 +1,156 @@
 ---
-# Target Debian version to upgrade to
+# =============================================================================
+# debian_upgrade role — default variables
+# =============================================================================
+# The only variable you MUST set is `debian_upgrade_target_version`.
+# Everything else has sensible defaults.
+#
+# Usage examples:
+#   -e debian_upgrade_target_version=12   # upgrade to Bookworm
+#   -e debian_upgrade_target_version=13   # upgrade to Trixie
+# =============================================================================
+
+# -------------------------------------------------------------------------
+# Target release
+# -------------------------------------------------------------------------
+# The Debian major version number to upgrade TO.
+# This is the primary input — the codename is resolved automatically
+# from `debian_upgrade_codenames` below.
 debian_upgrade_target_version: "13"
-debian_upgrade_target_codename: "trixie"
 
-# Supported source versions for upgrade
-debian_upgrade_supported_versions:
-  - "11"
-  - "12"
-
-# Codename mapping for supported versions
+# Codename map — version number → release codename.
+# Used to auto-resolve the target codename and to rewrite APT sources.
+# Extend this map when new Debian releases are announced.
 debian_upgrade_codenames:
+  "8": "jessie"
+  "9": "stretch"
+  "10": "buster"
   "11": "bullseye"
   "12": "bookworm"
   "13": "trixie"
+  "14": "forky"
 
+# Auto-derived codename for the target version.
+# You normally never need to override this — it is computed from the map above.
+# Set it explicitly ONLY if the target version is not yet in the map.
+debian_upgrade_target_codename: "{{ debian_upgrade_codenames[debian_upgrade_target_version] | default('') }}"
+
+# -------------------------------------------------------------------------
+# Upgrade path safety
+# -------------------------------------------------------------------------
+# Debian officially supports upgrading only from the immediately previous
+# release (N → N+1).  Skipping releases (e.g. 11 → 13) is unsupported and
+# may break the system.
+#
+# When `false` (default), the role enforces N → N+1 and fails if you try
+# to skip a release.  Set to `true` at your own risk to allow jumps.
+debian_upgrade_allow_skip_release: false
+
+# -------------------------------------------------------------------------
 # APT sources configuration
+# -------------------------------------------------------------------------
 debian_upgrade_apt_mirror: "deb.debian.org"
 debian_upgrade_apt_security_mirror: "security.debian.org"
 
-# Whether to include contrib and non-free components
+# Components to include in the generated sources.list.
+# Debian 12+ renamed "non-free" firmware to "non-free-firmware".
+# Both are listed here for maximum compatibility.
 debian_upgrade_apt_components: "main contrib non-free non-free-firmware"
 
-# Path to sources.list
+# Paths on the remote host
 debian_upgrade_sources_list_path: "/etc/apt/sources.list"
-
-# Directory for additional apt sources
 debian_upgrade_sources_list_d_path: "/etc/apt/sources.list.d"
 
-# Backup original sources.list before modifying
+# -------------------------------------------------------------------------
+# Backup
+# -------------------------------------------------------------------------
 debian_upgrade_backup_sources: true
 debian_upgrade_backup_path: "/etc/apt/sources.list.bak"
 
-# Whether to run full dist-upgrade (recommended: true)
+# -------------------------------------------------------------------------
+# Upgrade behaviour
+# -------------------------------------------------------------------------
+# Run full dist-upgrade (recommended: true).
 debian_upgrade_dist_upgrade: true
 
-# Whether to autoremove unused packages after upgrade
+# Remove obsolete packages after upgrade.
 debian_upgrade_autoremove: true
 
-# Whether to autoclean apt cache after upgrade
+# Clean the APT cache after upgrade.
 debian_upgrade_autoclean: true
 
-# Whether to allow automatic reboot after upgrade
-debian_upgrade_allow_reboot: true
-
-# Seconds to wait for the host to come back after reboot
-debian_upgrade_reboot_timeout: 600
-
-# Seconds to wait before starting reboot sequence
-debian_upgrade_reboot_delay: 5
-
-# Whether to update all packages on the current version before dist-upgrade
+# Fully update all packages on the CURRENT version before switching sources.
 debian_upgrade_pre_update: true
 
-# APT options passed to dist-upgrade to avoid interactive prompts
-debian_upgrade_apt_options:
-  - "-y"
-  - "-o Dpkg::Options::=--force-confdef"
-  - "-o Dpkg::Options::=--force-confold"
+# -------------------------------------------------------------------------
+# Reboot
+# -------------------------------------------------------------------------
+# Whether to reboot automatically after dist-upgrade.
+debian_upgrade_allow_reboot: true
 
-# Whether to check free disk space before upgrading
+# Seconds to wait for the host to come back after reboot.
+debian_upgrade_reboot_timeout: 600
+
+# Seconds to wait before starting the reboot sequence.
+debian_upgrade_reboot_delay: 5
+
+# -------------------------------------------------------------------------
+# Safety checks
+# -------------------------------------------------------------------------
+# Check free disk space on / before upgrading.
 debian_upgrade_check_disk_space: true
 
-# Minimum required free disk space in MB
+# Minimum required free disk space in MB.
 debian_upgrade_min_free_disk_mb: 4096
 
-# Whether to fail the play if the OS is already at target version or newer
+# Behaviour when the host is already at (or above) the target version:
+#   false → silently skip the host (end_host)
+#   true  → fail the play with an explicit error
 debian_upgrade_fail_if_already_upgraded: false
 
-# Whether to verify the upgraded version after reboot
+# Verify the OS version and APT health after reboot.
 debian_upgrade_verify_after_upgrade: true
 
-# Path to dpkg log for post-upgrade inspection
-debian_upgrade_dpkg_log_path: "/var/log/dpkg.log"
-
-# Whether to hold back specified packages during upgrade (e.g. kernel)
+# -------------------------------------------------------------------------
+# Package holds
+# -------------------------------------------------------------------------
+# Packages to mark as "hold" before the upgrade (e.g. custom kernels).
 debian_upgrade_held_packages: []
 # Example:
 # debian_upgrade_held_packages:
 #   - linux-image-amd64
 #   - grub-pc
 
-# Extra packages to install before starting the upgrade
+# -------------------------------------------------------------------------
+# Extra packages
+# -------------------------------------------------------------------------
+# Packages to install BEFORE the major upgrade.
 debian_upgrade_extra_packages_pre: []
 
-# Extra packages to install after the upgrade is complete
+# Packages to install AFTER the major upgrade.
 debian_upgrade_extra_packages_post: []
 
-# Timeout in seconds for individual apt operations
+# -------------------------------------------------------------------------
+# APT reliability
+# -------------------------------------------------------------------------
+# Timeout in seconds for individual long-running apt operations.
 debian_upgrade_apt_timeout: 3600
 
-# Number of retries for apt operations on transient failures
+# Number of retries on transient apt / network failures.
 debian_upgrade_apt_retries: 3
 
-# Delay in seconds between apt retries
+# Delay in seconds between retries.
 debian_upgrade_apt_retry_delay: 30
+
+# -------------------------------------------------------------------------
+# Logging
+# -------------------------------------------------------------------------
+# Path to dpkg log for post-upgrade inspection.
+debian_upgrade_dpkg_log_path: "/var/log/dpkg.log"
+
+# APT options passed to dist-upgrade to avoid interactive prompts.
+# (used internally; rarely needs changing)
+debian_upgrade_apt_options:
+  - "-y"
+  - "-o Dpkg::Options::=--force-confdef"
+  - "-o Dpkg::Options::=--force-confold"

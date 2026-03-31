@@ -5,6 +5,51 @@
 # so no initial setup task is needed here.
 
 # ============================================================
+# BLOCK 0: Resolve & validate target version
+# ============================================================
+- name: Resolve | Validate target version is present in codename map
+  ansible.builtin.assert:
+    that:
+      - debian_upgrade_target_version | string in debian_upgrade_codenames
+    fail_msg: >-
+      Target version '{{ debian_upgrade_target_version }}' is not in the codename map.
+      Known versions: {{ debian_upgrade_codenames.keys() | sort | join(', ') }}.
+      Add it to `debian_upgrade_codenames` or set `debian_upgrade_target_codename` explicitly.
+    success_msg: >-
+      Target version {{ debian_upgrade_target_version }} resolves to
+      codename '{{ debian_upgrade_codenames[debian_upgrade_target_version | string] }}'.
+  tags:
+    - always
+    - preflight
+
+- name: Resolve | Set effective target codename
+  ansible.builtin.set_fact:
+    _debian_upgrade_effective_codename: >-
+      {{ debian_upgrade_target_codename
+         if (debian_upgrade_target_codename | default('', true) | length > 0)
+         else debian_upgrade_codenames[debian_upgrade_target_version | string] }}
+    _debian_upgrade_current_version: "{{ ansible_facts['distribution_major_version'] }}"
+  tags:
+    - always
+    - preflight
+
+- name: Resolve | Override target codename with resolved value
+  ansible.builtin.set_fact:
+    debian_upgrade_target_codename: "{{ _debian_upgrade_effective_codename | trim }}"
+  tags:
+    - always
+    - preflight
+
+- name: Resolve | Print resolved target
+  ansible.builtin.debug:
+    msg: >-
+      Resolved upgrade target: Debian {{ debian_upgrade_target_version }}
+      ({{ debian_upgrade_target_codename }})
+  tags:
+    - always
+    - preflight
+
+# ============================================================
 # BLOCK 1: Pre-flight checks
 # ============================================================
 - name: Pre-flight | Verify OS is Debian
@@ -19,30 +64,33 @@
     - always
     - preflight
 
-- name: Pre-flight | Check current Debian version is supported for upgrade
+- name: Pre-flight | Validate current version is in codename map
   ansible.builtin.assert:
     that:
-      - ansible_facts['distribution_major_version'] in debian_upgrade_supported_versions
+      - _debian_upgrade_current_version in debian_upgrade_codenames
     fail_msg: >-
-      Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }})
-      is not supported for upgrade by this role.
-      Supported source versions: {{ debian_upgrade_supported_versions | join(', ') }}.
+      Current Debian version {{ _debian_upgrade_current_version }}
+      ({{ ansible_facts['distribution_release'] }}) is not in the codename map.
+      Known versions: {{ debian_upgrade_codenames.keys() | sort | join(', ') }}.
     success_msg: >-
-      Version check passed: Debian {{ ansible_facts['distribution_major_version'] }}
-      ({{ ansible_facts['distribution_release'] }}) is eligible for upgrade.
+      Current version {{ _debian_upgrade_current_version }}
+      ({{ ansible_facts['distribution_release'] }}) is recognised.
   tags:
     - always
     - preflight
 
+# --- Already-at-target checks run FIRST so hosts that need no work
+#     are skipped gracefully before stricter validations kick in. ---
+
 - name: Pre-flight | Check if host is already at target version
   ansible.builtin.assert:
     that:
-      - ansible_facts['distribution_major_version'] != debian_upgrade_target_version
+      - _debian_upgrade_current_version != debian_upgrade_target_version
     fail_msg: >-
-      Host is already running Debian {{ ansible_facts['distribution_major_version'] }}
+      Host is already running Debian {{ _debian_upgrade_current_version }}
       ({{ debian_upgrade_target_codename }}). No upgrade needed.
     success_msg: >-
-      Host is on Debian {{ ansible_facts['distribution_major_version'] }}, upgrade to
+      Host is on Debian {{ _debian_upgrade_current_version }}, upgrade to
       {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }}) will proceed.
   when: debian_upgrade_fail_if_already_upgraded | bool
   tags:
@@ -53,7 +101,84 @@
   ansible.builtin.meta: end_host
   when:
     - not (debian_upgrade_fail_if_already_upgraded | bool)
-    - ansible_facts['distribution_major_version'] == debian_upgrade_target_version
+    - _debian_upgrade_current_version == debian_upgrade_target_version
+  tags:
+    - always
+    - preflight
+
+# --- From here on the host is NOT at the target version. ---
+#     It could still be ABOVE it (e.g. target=12 but host is on 13).
+#     Handle that gracefully before the hard assert.
+
+- name: Pre-flight | Skip play if host is already above target version (non-fatal)
+  ansible.builtin.debug:
+    msg: >-
+      Host is already on Debian {{ _debian_upgrade_current_version }}
+      ({{ ansible_facts['distribution_release'] }}), which is newer than the
+      requested target {{ debian_upgrade_target_version }}
+      ({{ debian_upgrade_target_codename }}). Nothing to do — skipping.
+  when:
+    - _debian_upgrade_current_version | int > debian_upgrade_target_version | int
+    - not (debian_upgrade_fail_if_already_upgraded | bool)
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | End play for hosts already above target version
+  ansible.builtin.meta: end_host
+  when:
+    - _debian_upgrade_current_version | int > debian_upgrade_target_version | int
+    - not (debian_upgrade_fail_if_already_upgraded | bool)
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | Validate target version is higher than current
+  ansible.builtin.assert:
+    that:
+      - debian_upgrade_target_version | int > _debian_upgrade_current_version | int
+    fail_msg: >-
+      Target version {{ debian_upgrade_target_version }} is not higher than the
+      current version {{ _debian_upgrade_current_version }}.
+      You cannot downgrade with this role.
+    success_msg: >-
+      Upgrade direction OK: {{ _debian_upgrade_current_version }} → {{ debian_upgrade_target_version }}
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | Enforce sequential upgrade path (N → N+1)
+  ansible.builtin.assert:
+    that:
+      - (debian_upgrade_target_version | int) == (_debian_upgrade_current_version | int + 1)
+    fail_msg: >-
+      Debian only supports upgrading from one release to the next (N → N+1).
+      You are trying to jump from {{ _debian_upgrade_current_version }}
+      ({{ debian_upgrade_codenames[_debian_upgrade_current_version] }})
+      to {{ debian_upgrade_target_version }}
+      ({{ debian_upgrade_target_codename }}).
+      Upgrade to Debian {{ (_debian_upgrade_current_version | int + 1) }}
+      ({{ debian_upgrade_codenames[(_debian_upgrade_current_version | int + 1) | string] | default('unknown') }})
+      first, or set `debian_upgrade_allow_skip_release: true` to override
+      (unsupported and may break the system).
+    success_msg: >-
+      Sequential upgrade path confirmed:
+      {{ _debian_upgrade_current_version }} → {{ debian_upgrade_target_version }}
+  when: not (debian_upgrade_allow_skip_release | default(false) | bool)
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | Warn about skip-release upgrade
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: You are skipping {{ (debian_upgrade_target_version | int) - (_debian_upgrade_current_version | int) - 1 }}
+      release(s) ({{ _debian_upgrade_current_version }} → {{ debian_upgrade_target_version }}).
+      This is NOT officially supported by Debian and may result in a broken system.
+      Proceeding because `debian_upgrade_allow_skip_release` is true.
+  when:
+    - debian_upgrade_allow_skip_release | default(false) | bool
+    - (debian_upgrade_target_version | int) > (_debian_upgrade_current_version | int + 1)
   tags:
     - always
     - preflight
@@ -121,8 +246,9 @@
       - "  Debian Major Version Upgrade Plan"
       - "========================================"
       - "  Host           : {{ inventory_hostname }}"
-      - "  From version   : Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }})"
+      - "  From version   : Debian {{ _debian_upgrade_current_version }} ({{ ansible_facts['distribution_release'] }})"
       - "  To version     : Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }})"
+      - "  Upgrade path   : {{ 'sequential (N→N+1)' if (debian_upgrade_target_version | int) == (_debian_upgrade_current_version | int + 1) else 'SKIP-RELEASE ⚠️' }}"
       - "  Auto-reboot    : {{ debian_upgrade_allow_reboot }}"
       - "  Pre-update     : {{ debian_upgrade_pre_update }}"
       - "  Backup sources : {{ debian_upgrade_backup_sources }}"
@@ -212,7 +338,7 @@
     - pre-upgrade
 
 # ============================================================
-# BLOCK 3: Rewrite APT sources to Debian 13 (Trixie)
+# BLOCK 3: Rewrite APT sources to target Debian release
 # ============================================================
 - name: Sources | Backup current sources.list
   ansible.builtin.copy:
@@ -248,10 +374,10 @@
   tags:
     - sources
 
-- name: Sources | Replace old codename with trixie in sources.list.d files
+- name: Sources | Replace old codename with target codename in sources.list.d files
   ansible.builtin.replace:
     path: "{{ item.path }}"
-    regexp: "{{ debian_upgrade_codenames[ansible_facts['distribution_major_version']] }}"
+    regexp: "{{ debian_upgrade_codenames[_debian_upgrade_current_version] }}"
     replace: "{{ debian_upgrade_target_codename }}"
     backup: false
   loop: "{{ sources_list_d_files.files }}"
@@ -287,7 +413,7 @@
     - sources
 
 # ============================================================
-# BLOCK 4: dist-upgrade to Debian 13
+# BLOCK 4: dist-upgrade to target Debian release
 # ============================================================
 - name: Dist-upgrade | Run apt-get upgrade (minimal upgrade first)
   ansible.builtin.apt:
@@ -384,7 +510,7 @@
     msg: >-
       Skipping post-upgrade verification because --check mode is active.
       No real upgrade was performed — OS is still
-      Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }}).
+      Debian {{ _debian_upgrade_current_version }} ({{ ansible_facts['distribution_release'] }}).
   when: ansible_check_mode
   tags:
     - verify

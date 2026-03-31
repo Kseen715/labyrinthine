@@ -1,12 +1,13 @@
 # =============================================================================
 # Makefile — convenience targets for the Debian upgrade Ansible playbook
-# Usage: make <target> [LIMIT=hostname] [TAGS=tag1,tag2] [EXTRA="-e key=val"]
+# Usage: make <target> [VERSION=12|13] [LIMIT=host] [TAGS=tag] [EXTRA="-e k=v"]
 # =============================================================================
 
 INVENTORY     ?= inventory/secret_hosts.yml
 PLAYBOOK      ?= upgrade_debian.yml
 REQUIREMENTS  ?= requirements.yml
 LIMIT         ?= debian_hosts
+VERSION       ?= 13
 TAGS          ?=
 SKIP_TAGS     ?=
 EXTRA         ?=
@@ -17,8 +18,9 @@ _LIMIT     = $(if $(LIMIT),--limit $(LIMIT),)
 _TAGS      = $(if $(TAGS),--tags $(TAGS),)
 _SKIP_TAGS = $(if $(SKIP_TAGS),--skip-tags $(SKIP_TAGS),)
 _EXTRA     = $(if $(EXTRA),$(EXTRA),)
+_VERSION   = -e debian_upgrade_target_version=$(VERSION)
 
-COMMON_ARGS = -i $(INVENTORY) $(_LIMIT) $(_TAGS) $(_SKIP_TAGS) $(_EXTRA) $(ANSIBLE_ARGS)
+COMMON_ARGS = -i $(INVENTORY) $(_LIMIT) $(_TAGS) $(_SKIP_TAGS) $(_VERSION) $(_EXTRA) $(ANSIBLE_ARGS)
 
 .DEFAULT_GOAL := help
 
@@ -28,21 +30,26 @@ COMMON_ARGS = -i $(INVENTORY) $(_LIMIT) $(_TAGS) $(_SKIP_TAGS) $(_EXTRA) $(ANSIB
 .PHONY: help
 help: ## Show this help message
 	@echo ""
-	@echo "  Debian 11/12 → 13 (Trixie) Upgrade Playbook"
+	@echo "  Debian Major Version Upgrade Playbook"
 	@echo ""
-	@echo "  Usage:  make <target> [LIMIT=host] [TAGS=tag] [EXTRA='-e key=val']"
+	@echo "  Usage:  make <target> [VERSION=12|13] [LIMIT=host] [TAGS=tag] [EXTRA='-e key=val']"
+	@echo ""
+	@echo "  VERSION controls which Debian release to upgrade TO (default: $(VERSION))."
+	@echo "  The codename is resolved automatically from the codename map."
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"; section=""} \
 	      /^## / {section=substr($$0,4); next} \
-	      /^[a-zA-Z_-]+:.*##/ { \
+	      /^[a-zA-Z_0-9-]+:.*##/ { \
 	        printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2 \
 	      }' $(MAKEFILE_LIST)
 	@echo ""
 	@echo "  Examples:"
-	@echo "    make check"
-	@echo "    make run   LIMIT=debian-server-01"
-	@echo "    make run   LIMIT=debian-server-01 EXTRA='-e debian_upgrade_allow_reboot=false'"
-	@echo "    make tags  TAGS=preflight"
+	@echo "    make check                                      # dry-run upgrade to $(VERSION)"
+	@echo "    make check VERSION=12                           # dry-run upgrade to 12 (bookworm)"
+	@echo "    make run VERSION=13                             # upgrade to 13 (trixie)"
+	@echo "    make run VERSION=12 LIMIT=debian-server-01      # upgrade one host to 12"
+	@echo "    make run-no-reboot VERSION=13                   # upgrade without auto-reboot"
+	@echo "    make run VERSION=13 EXTRA='-e debian_upgrade_allow_skip_release=true'  # skip-release"
 	@echo ""
 
 ## Galaxy
@@ -76,22 +83,52 @@ facts: ## Gather and display facts from target hosts
 os-check: ## Show current OS version on all target hosts
 	ansible -i $(INVENTORY) $(LIMIT) -m ansible.builtin.command -a "cat /etc/os-release"
 
-## Playbook
+## Playbook — version-aware targets
 .PHONY: check
-check: ## Dry-run: show what WOULD change, no modifications applied (--check --diff)
+check: ## Dry-run upgrade to VERSION (--check --diff)
 	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) --check --diff
 
 .PHONY: diff
 diff: check ## Alias for 'check' (dry-run with diff output)
 
 .PHONY: run
-run: ## Run the full upgrade playbook (applies real changes)
+run: ## Run the full upgrade to VERSION (applies real changes)
 	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS)
 
 .PHONY: run-verbose
-run-verbose: ## Run the full upgrade playbook with verbose output (-vvv)
+run-verbose: ## Run the full upgrade to VERSION with verbose output (-vvv)
 	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) -vvv
 
+.PHONY: run-no-reboot
+run-no-reboot: ## Upgrade to VERSION but skip automatic reboot
+	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) -e "debian_upgrade_allow_reboot=false"
+
+## Version-specific shortcuts
+.PHONY: upgrade-to-12
+upgrade-to-12: ## Shortcut: upgrade to Debian 12 (bookworm)
+	$(MAKE) run VERSION=12
+
+.PHONY: upgrade-to-13
+upgrade-to-13: ## Shortcut: upgrade to Debian 13 (trixie)
+	$(MAKE) run VERSION=13
+
+.PHONY: upgrade-to-14
+upgrade-to-14: ## Shortcut: upgrade to Debian 14 (forky)
+	$(MAKE) run VERSION=14
+
+.PHONY: check-12
+check-12: ## Shortcut: dry-run upgrade to Debian 12 (bookworm)
+	$(MAKE) check VERSION=12
+
+.PHONY: check-13
+check-13: ## Shortcut: dry-run upgrade to Debian 13 (trixie)
+	$(MAKE) check VERSION=13
+
+.PHONY: check-14
+check-14: ## Shortcut: dry-run upgrade to Debian 14 (forky)
+	$(MAKE) check VERSION=14
+
+## Tag-based execution
 .PHONY: tags
 tags: ## Run only specific stages. Usage: make tags TAGS=preflight,sources
 	@test -n "$(TAGS)" || (echo "Error: TAGS is required. Example: make tags TAGS=preflight" && exit 1)
@@ -104,7 +141,7 @@ skip: ## Skip specific stages. Usage: make skip SKIP_TAGS=reboot
 
 ## Staged execution
 .PHONY: preflight
-preflight: ## Run only pre-flight checks (no changes)
+preflight: ## Run only pre-flight checks for VERSION (no changes)
 	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) --tags preflight --check
 
 .PHONY: pre-upgrade
@@ -112,7 +149,7 @@ pre-upgrade: ## Run only the pre-upgrade package update stage
 	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) --tags pre-upgrade
 
 .PHONY: sources
-sources: ## Rewrite APT sources to Trixie only (no dist-upgrade)
+sources: ## Rewrite APT sources to target release only (no dist-upgrade)
 	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) --tags sources
 
 .PHONY: dist-upgrade
@@ -123,11 +160,7 @@ dist-upgrade: ## Run the dist-upgrade stage only (sources must already be update
 verify: ## Run post-upgrade verification only
 	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) --tags verify
 
-## No-reboot helpers
-.PHONY: run-no-reboot
-run-no-reboot: ## Run full upgrade but skip automatic reboot
-	ansible-playbook $(PLAYBOOK) $(COMMON_ARGS) -e "debian_upgrade_allow_reboot=false"
-
+## Reboot helpers
 .PHONY: reboot-hosts
 reboot-hosts: ## Reboot target hosts and wait for them to come back
 	ansible -i $(INVENTORY) $(LIMIT) -m ansible.builtin.reboot \
