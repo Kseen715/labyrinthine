@@ -1,0 +1,27 @@
+# /etc/apt/sources.list
+# Managed by Ansible — do not edit manually
+# Generated for Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }})
+# Source version: {{ ansible_facts['distribution_version'] }} ({{ ansible_facts['distribution_release'] }})
+# Date: {{ ansible_facts['date_time']['iso8601'] }}
+
+# Main repository
+deb http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }} {{ debian_upgrade_apt_components }}
+deb-src http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }} {{ debian_upgrade_apt_components }}
+
+# Security updates
+deb http://{{ debian_upgrade_apt_security_mirror }}/debian-security {{ debian_upgrade_target_codename }}-security {{ debian_upgrade_apt_components }}
+deb-src http://{{ debian_upgrade_apt_security_mirror }}/debian-security {{ debian_upgrade_target_codename }}-security {{ debian_upgrade_apt_components }}
+
+# Stable updates (previously known as volatile)
+deb http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }}-updates {{ debian_upgrade_apt_components }}
+deb-src http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }}-updates {{ debian_upgrade_apt_components }}
+
+# Proposed updates — packages that are candidates for the next point release
+# Uncomment if you want access to proposed updates (not recommended for production)
+# deb http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }}-proposed-updates {{ debian_upgrade_apt_components }}
+# deb-src http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }}-proposed-updates {{ debian_upgrade_apt_components }}
+
+# Backports — newer versions of some packages from the next Debian release
+# Uncomment to enable backports (install manually with: apt install -t {{ debian_upgrade_target_codename }}-backports <pkg>)
+# deb http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }}-backports {{ debian_upgrade_apt_components }}
+# deb-src http://{{ debian_upgrade_apt_mirror }}/debian {{ debian_upgrade_target_codename }}-backports {{ debian_upgrade_apt_components }}

@@ -1,0 +1,37 @@
+---
+galaxy_info:
+  role_name: debian_upgrade
+  author: your_username
+  description: >
+    Upgrades Debian 11 (Bullseye) or Debian 12 (Bookworm) to
+    Debian 13 (Trixie) with pre-flight checks, sources rewrite,
+    dist-upgrade, and optional reboot.
+
+  company: ""
+  license: MIT
+
+  min_ansible_version: "2.14"
+
+  platforms:
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+
+  galaxy_tags:
+    - debian
+    - upgrade
+    - dist-upgrade
+    - apt
+    - trixie
+    - system
+    - linux
+
+dependencies:
+  # Fully update the current system before attempting a major version upgrade
+  - role: robertdebock.update
+    vars:
+      update_reboot: false          # we handle reboots ourselves
+
+  # Bootstrap Python and minimal tooling if not already present
+  - role: robertdebock.bootstrap

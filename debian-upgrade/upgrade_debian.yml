@@ -1,0 +1,183 @@
+---
+# =============================================================================
+# upgrade_debian.yml — Main playbook: upgrade Debian 11/12 → Debian 13 (Trixie)
+#
+# Usage:
+#   # Install Galaxy dependencies first:
+#   ansible-galaxy install -r requirements.yml
+#
+#   # Run full upgrade:
+#   ansible-playbook -i inventory/hosts.yml upgrade_debian.yml
+#
+#   # Dry-run (check mode, no changes applied):
+#   ansible-playbook -i inventory/hosts.yml upgrade_debian.yml --check --diff
+#
+#   # Limit to a single host:
+#   ansible-playbook -i inventory/hosts.yml upgrade_debian.yml --limit debian-server-01
+#
+#   # Run only pre-flight checks:
+#   ansible-playbook -i inventory/hosts.yml upgrade_debian.yml --tags preflight
+#
+#   # Skip reboot (useful for staging):
+#   ansible-playbook -i inventory/hosts.yml upgrade_debian.yml -e "debian_upgrade_allow_reboot=false"
+#
+#   # Override target mirror:
+#   ansible-playbook -i inventory/hosts.yml upgrade_debian.yml -e "debian_upgrade_apt_mirror=ftp.ru.debian.org"
+# =============================================================================
+
+- name: Upgrade Debian 11/12 to Debian 13 (Trixie)
+  hosts: debian_hosts
+  become: true
+  become_method: sudo
+  gather_facts: true
+  serial: 1             # upgrade one host at a time to avoid mass outages
+  any_errors_fatal: false
+
+  vars:
+    # -------------------------------------------------------------------------
+    # Override any role defaults here or pass them via -e / group_vars / host_vars
+    # -------------------------------------------------------------------------
+
+    # Target release — change only if you know what you are doing
+    debian_upgrade_target_version: "13"
+    debian_upgrade_target_codename: "trixie"
+
+    # Debian versions this playbook is allowed to upgrade FROM
+    debian_upgrade_supported_versions:
+      - "11"
+      - "12"
+
+    # Codename lookup table (used when rewriting sources.list.d files)
+    debian_upgrade_codenames:
+      "11": "bullseye"
+      "12": "bookworm"
+      "13": "trixie"
+
+    # APT mirror — override with a closer mirror for faster downloads, e.g.:
+    #   ftp.de.debian.org / ftp.ru.debian.org / mirror.yandex.ru/debian
+    debian_upgrade_apt_mirror: "deb.debian.org"
+    debian_upgrade_apt_security_mirror: "security.debian.org"
+
+    # APT components to include in generated sources.list
+    debian_upgrade_apt_components: "main contrib non-free non-free-firmware"
+
+    # Set to false in production to reboot manually at a maintenance window
+    debian_upgrade_allow_reboot: true
+    debian_upgrade_reboot_timeout: 600
+    debian_upgrade_reboot_delay: 5
+
+    # Fully update the running system before switching to trixie sources
+    debian_upgrade_pre_update: true
+
+    # Backup /etc/apt/sources.list before overwriting it
+    debian_upgrade_backup_sources: true
+    debian_upgrade_backup_path: "/etc/apt/sources.list.bak"
+
+    # Minimum free disk space required on / (in MB) before starting upgrade
+    debian_upgrade_check_disk_space: true
+    debian_upgrade_min_free_disk_mb: 4096
+
+    # Run dist-upgrade (as opposed to just safe-upgrade)
+    debian_upgrade_dist_upgrade: true
+
+    # Clean up obsolete packages after dist-upgrade
+    debian_upgrade_autoremove: true
+    debian_upgrade_autoclean: true
+
+    # Verify Debian version and apt health after reboot
+    debian_upgrade_verify_after_upgrade: true
+
+    # Do not fail the play if the host is already on the target version —
+    # just skip it cleanly (set to true to make it an explicit error)
+    debian_upgrade_fail_if_already_upgraded: false
+
+    # Packages to pin to "hold" state before upgrade (e.g. custom kernels)
+    debian_upgrade_held_packages: []
+
+    # Extra packages to install before / after the upgrade
+    debian_upgrade_extra_packages_pre: []
+    debian_upgrade_extra_packages_post: []
+
+    # Timeout (seconds) for individual long-running apt operations
+    debian_upgrade_apt_timeout: 3600
+
+    # Retry parameters for transient apt / network failures
+    debian_upgrade_apt_retries: 3
+    debian_upgrade_apt_retry_delay: 30
+
+  pre_tasks:
+    # -------------------------------------------------------------------------
+    # Gather a minimal set of facts before the role's own targeted setup runs.
+    # This ensures variables like ansible_distribution are available for the
+    # early assert in the role even if gather_facts: false is set above.
+    # -------------------------------------------------------------------------
+    - name: Assert minimum Ansible version
+      ansible.builtin.assert:
+        that:
+          - ansible_version.full is version('2.14', '>=')
+        fail_msg: >-
+          This playbook requires Ansible >= 2.14.
+          Detected version: {{ ansible_version.full }}.
+          Please upgrade: pip install --upgrade ansible
+        success_msg: "Ansible version check passed: {{ ansible_version.full }}"
+      delegate_to: localhost
+      run_once: true
+      tags:
+        - always
+
+    - name: Print host info before upgrade
+      ansible.builtin.debug:
+        msg:
+          - "Host          : {{ inventory_hostname }} ({{ ansible_host | default(inventory_hostname) }})"
+          - "Current OS    : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }} ({{ ansible_facts['distribution_release'] }})"
+          - "Target OS     : Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }})"
+          - "Ansible user  : {{ ansible_facts['user_id'] | default('root') }}"
+      tags:
+        - always
+
+    - name: Confirm upgrade interactively (skipped in non-interactive / CI runs)
+      ansible.builtin.pause:
+        prompt: >-
+          You are about to upgrade {{ inventory_hostname }} from
+          Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }})
+          to Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }}).
+          This is a MAJOR version upgrade. Press ENTER to continue or Ctrl+C → A to abort.
+      when:
+        - not (ansible_check_mode | bool)
+        - lookup('env', 'CI') == ''          # skip in CI environments
+        - lookup('env', 'ANSIBLE_NOCONFIRM') == ''
+      tags:
+        - always
+
+  roles:
+    # -------------------------------------------------------------------------
+    # The debian_upgrade role declared in roles/debian_upgrade.
+    # Galaxy dependencies (robertdebock.bootstrap, robertdebock.update) are
+    # declared in roles/debian_upgrade/meta/main.yml and run automatically.
+    # -------------------------------------------------------------------------
+    - role: debian_upgrade
+      tags:
+        - debian_upgrade
+
+  post_tasks:
+    - name: Post-play | Record upgrade timestamp on remote host
+      ansible.builtin.copy:
+        content: |
+          Upgraded by Ansible on {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+          From : Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }})
+          To   : Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }})
+          Host : {{ inventory_hostname }}
+        dest: /etc/ansible-debian-upgrade.log
+        owner: root
+        group: root
+        mode: "0644"
+      tags:
+        - always
+
+    - name: Post-play | Confirm upgrade is done
+      ansible.builtin.debug:
+        msg: >-
+          All done! {{ inventory_hostname }} has been successfully upgraded to
+          Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }}).
+      tags:
+        - always

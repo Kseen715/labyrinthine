@@ -1,0 +1,96 @@
+---
+# Target Debian version to upgrade to
+debian_upgrade_target_version: "13"
+debian_upgrade_target_codename: "trixie"
+
+# Supported source versions for upgrade
+debian_upgrade_supported_versions:
+  - "11"
+  - "12"
+
+# Codename mapping for supported versions
+debian_upgrade_codenames:
+  "11": "bullseye"
+  "12": "bookworm"
+  "13": "trixie"
+
+# APT sources configuration
+debian_upgrade_apt_mirror: "deb.debian.org"
+debian_upgrade_apt_security_mirror: "security.debian.org"
+
+# Whether to include contrib and non-free components
+debian_upgrade_apt_components: "main contrib non-free non-free-firmware"
+
+# Path to sources.list
+debian_upgrade_sources_list_path: "/etc/apt/sources.list"
+
+# Directory for additional apt sources
+debian_upgrade_sources_list_d_path: "/etc/apt/sources.list.d"
+
+# Backup original sources.list before modifying
+debian_upgrade_backup_sources: true
+debian_upgrade_backup_path: "/etc/apt/sources.list.bak"
+
+# Whether to run full dist-upgrade (recommended: true)
+debian_upgrade_dist_upgrade: true
+
+# Whether to autoremove unused packages after upgrade
+debian_upgrade_autoremove: true
+
+# Whether to autoclean apt cache after upgrade
+debian_upgrade_autoclean: true
+
+# Whether to allow automatic reboot after upgrade
+debian_upgrade_allow_reboot: true
+
+# Seconds to wait for the host to come back after reboot
+debian_upgrade_reboot_timeout: 600
+
+# Seconds to wait before starting reboot sequence
+debian_upgrade_reboot_delay: 5
+
+# Whether to update all packages on the current version before dist-upgrade
+debian_upgrade_pre_update: true
+
+# APT options passed to dist-upgrade to avoid interactive prompts
+debian_upgrade_apt_options:
+  - "-y"
+  - "-o Dpkg::Options::=--force-confdef"
+  - "-o Dpkg::Options::=--force-confold"
+
+# Whether to check free disk space before upgrading
+debian_upgrade_check_disk_space: true
+
+# Minimum required free disk space in MB
+debian_upgrade_min_free_disk_mb: 4096
+
+# Whether to fail the play if the OS is already at target version or newer
+debian_upgrade_fail_if_already_upgraded: false
+
+# Whether to verify the upgraded version after reboot
+debian_upgrade_verify_after_upgrade: true
+
+# Path to dpkg log for post-upgrade inspection
+debian_upgrade_dpkg_log_path: "/var/log/dpkg.log"
+
+# Whether to hold back specified packages during upgrade (e.g. kernel)
+debian_upgrade_held_packages: []
+# Example:
+# debian_upgrade_held_packages:
+#   - linux-image-amd64
+#   - grub-pc
+
+# Extra packages to install before starting the upgrade
+debian_upgrade_extra_packages_pre: []
+
+# Extra packages to install after the upgrade is complete
+debian_upgrade_extra_packages_post: []
+
+# Timeout in seconds for individual apt operations
+debian_upgrade_apt_timeout: 3600
+
+# Number of retries for apt operations on transient failures
+debian_upgrade_apt_retries: 3
+
+# Delay in seconds between apt retries
+debian_upgrade_apt_retry_delay: 30

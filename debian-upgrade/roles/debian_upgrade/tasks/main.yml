@@ -1,0 +1,484 @@
+---
+# tasks/main.yml — Main entry point for the debian_upgrade role
+# All facts use ansible_facts['...'] syntax (future-proof for Ansible 2.24+).
+# Full fact gathering is handled by gather_facts: true in the playbook,
+# so no initial setup task is needed here.
+
+# ============================================================
+# BLOCK 1: Pre-flight checks
+# ============================================================
+- name: Pre-flight | Verify OS is Debian
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == "Debian"
+    fail_msg: >-
+      This role only supports Debian. Detected OS:
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+    success_msg: "OS check passed: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | Check current Debian version is supported for upgrade
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution_major_version'] in debian_upgrade_supported_versions
+    fail_msg: >-
+      Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }})
+      is not supported for upgrade by this role.
+      Supported source versions: {{ debian_upgrade_supported_versions | join(', ') }}.
+    success_msg: >-
+      Version check passed: Debian {{ ansible_facts['distribution_major_version'] }}
+      ({{ ansible_facts['distribution_release'] }}) is eligible for upgrade.
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | Check if host is already at target version
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution_major_version'] != debian_upgrade_target_version
+    fail_msg: >-
+      Host is already running Debian {{ ansible_facts['distribution_major_version'] }}
+      ({{ debian_upgrade_target_codename }}). No upgrade needed.
+    success_msg: >-
+      Host is on Debian {{ ansible_facts['distribution_major_version'] }}, upgrade to
+      {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }}) will proceed.
+  when: debian_upgrade_fail_if_already_upgraded | bool
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | Skip play if already at target version (non-fatal)
+  ansible.builtin.meta: end_host
+  when:
+    - not (debian_upgrade_fail_if_already_upgraded | bool)
+    - ansible_facts['distribution_major_version'] == debian_upgrade_target_version
+  tags:
+    - always
+    - preflight
+
+- name: Pre-flight | Check available disk space on /
+  ansible.builtin.assert:
+    that:
+      - (item.mount == '/') and
+        ((item.size_available | int) / 1024 / 1024 >= debian_upgrade_min_free_disk_mb | int)
+    fail_msg: >-
+      Not enough free disk space on '/'.
+      Required: {{ debian_upgrade_min_free_disk_mb }} MB,
+      Available: {{ ((item.size_available | int) / 1024 / 1024) | int }} MB.
+    success_msg: >-
+      Disk space check passed: {{ ((item.size_available | int) / 1024 / 1024) | int }} MB
+      free on '/'.
+  loop: "{{ ansible_facts['mounts'] }}"
+  when:
+    - debian_upgrade_check_disk_space | bool
+    - item.mount == '/'
+  tags:
+    - preflight
+
+- name: Pre-flight | Verify apt is not locked
+  ansible.builtin.command:
+    cmd: fuser /var/lib/dpkg/lock-frontend
+  register: apt_lock_check
+  changed_when: false
+  failed_when: apt_lock_check.rc == 0
+  tags:
+    - preflight
+
+- name: Pre-flight | Check for held packages that may block upgrade
+  ansible.builtin.command:
+    cmd: apt-mark showhold
+  register: apt_held_packages
+  changed_when: false
+  tags:
+    - preflight
+
+- name: Pre-flight | Warn about held packages
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: The following packages are held and may cause issues during dist-upgrade:
+      {{ apt_held_packages.stdout_lines | join(', ') }}.
+      Consider releasing holds before proceeding.
+  when:
+    - apt_held_packages.stdout_lines | length > 0
+  tags:
+    - preflight
+
+- name: Pre-flight | Hold specified packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ debian_upgrade_held_packages }}"
+  when: debian_upgrade_held_packages | length > 0
+  tags:
+    - preflight
+
+- name: Pre-flight | Print upgrade plan summary
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "  Debian Major Version Upgrade Plan"
+      - "========================================"
+      - "  Host           : {{ inventory_hostname }}"
+      - "  From version   : Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }})"
+      - "  To version     : Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }})"
+      - "  Auto-reboot    : {{ debian_upgrade_allow_reboot }}"
+      - "  Pre-update     : {{ debian_upgrade_pre_update }}"
+      - "  Backup sources : {{ debian_upgrade_backup_sources }}"
+      - "========================================"
+  tags:
+    - preflight
+
+# ============================================================
+# BLOCK 2: Pre-upgrade — fully update current OS
+# ============================================================
+- name: Pre-upgrade | Install prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - python3-apt
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: prereq_install_result
+  until: prereq_install_result is succeeded
+  tags:
+    - pre-upgrade
+
+- name: Pre-upgrade | Install extra packages (pre-upgrade)
+  ansible.builtin.apt:
+    name: "{{ debian_upgrade_extra_packages_pre }}"
+    state: present
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: extra_pre_install_result
+  until: extra_pre_install_result is succeeded
+  when: debian_upgrade_extra_packages_pre | length > 0
+  tags:
+    - pre-upgrade
+
+- name: Pre-upgrade | Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: pre_cache_update
+  until: pre_cache_update is succeeded
+  when: debian_upgrade_pre_update | bool
+  tags:
+    - pre-upgrade
+
+- name: Pre-upgrade | Upgrade all packages on current Debian version
+  ansible.builtin.apt:
+    upgrade: full
+    autoclean: true
+    autoremove: false
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: pre_upgrade_result
+  until: pre_upgrade_result is succeeded
+  async: "{{ debian_upgrade_apt_timeout }}"
+  poll: 30
+  when: debian_upgrade_pre_update | bool
+  tags:
+    - pre-upgrade
+
+- name: Pre-upgrade | Check if reboot is required after pre-update
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: reboot_required_pre
+  tags:
+    - pre-upgrade
+
+- name: Pre-upgrade | Reboot if required before dist-upgrade
+  ansible.builtin.reboot:
+    msg: "Rebooting before dist-upgrade to apply pending updates"
+    pre_reboot_delay: "{{ debian_upgrade_reboot_delay }}"
+    post_reboot_delay: 30
+    reboot_timeout: "{{ debian_upgrade_reboot_timeout }}"
+    test_command: uptime
+  when:
+    - reboot_required_pre.stat.exists
+    - debian_upgrade_allow_reboot | bool
+  tags:
+    - pre-upgrade
+
+# ============================================================
+# BLOCK 3: Rewrite APT sources to Debian 13 (Trixie)
+# ============================================================
+- name: Sources | Backup current sources.list
+  ansible.builtin.copy:
+    src: "{{ debian_upgrade_sources_list_path }}"
+    dest: "{{ debian_upgrade_backup_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: debian_upgrade_backup_sources | bool
+  tags:
+    - sources
+
+- name: Sources | Find all .list files in sources.list.d
+  ansible.builtin.find:
+    paths: "{{ debian_upgrade_sources_list_d_path }}"
+    patterns: "*.list"
+    recurse: false
+  register: sources_list_d_files
+  tags:
+    - sources
+
+- name: Sources | Backup all sources.list.d files
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ item.path }}.bak"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ sources_list_d_files.files }}"
+  when: debian_upgrade_backup_sources | bool
+  tags:
+    - sources
+
+- name: Sources | Replace old codename with trixie in sources.list.d files
+  ansible.builtin.replace:
+    path: "{{ item.path }}"
+    regexp: "{{ debian_upgrade_codenames[ansible_facts['distribution_major_version']] }}"
+    replace: "{{ debian_upgrade_target_codename }}"
+    backup: false
+  loop: "{{ sources_list_d_files.files }}"
+  notify: Update apt cache
+  tags:
+    - sources
+
+- name: Sources | Deploy new sources.list for Debian {{ debian_upgrade_target_version }}
+  ansible.builtin.template:
+    src: sources.list.j2
+    dest: "{{ debian_upgrade_sources_list_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "grep -q '{{ debian_upgrade_target_codename }}' %s"
+    backup: false
+  notify: Update apt cache
+  tags:
+    - sources
+
+- name: Sources | Force flush handlers (update apt cache now)
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - sources
+
+- name: Sources | Verify new sources contain target codename
+  ansible.builtin.command:
+    cmd: "grep -r '{{ debian_upgrade_target_codename }}' {{ debian_upgrade_sources_list_path }}"
+  register: sources_verify
+  changed_when: false
+  failed_when: sources_verify.rc != 0
+  tags:
+    - sources
+
+# ============================================================
+# BLOCK 4: dist-upgrade to Debian 13
+# ============================================================
+- name: Dist-upgrade | Run apt-get upgrade (minimal upgrade first)
+  ansible.builtin.apt:
+    upgrade: safe
+    dpkg_options: "force-confdef,force-confold"
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: safe_upgrade_result
+  until: safe_upgrade_result is succeeded
+  async: "{{ debian_upgrade_apt_timeout }}"
+  poll: 30
+  tags:
+    - dist-upgrade
+
+- name: Dist-upgrade | Run full dist-upgrade to Debian {{ debian_upgrade_target_version }}
+  ansible.builtin.apt:
+    upgrade: dist
+    dpkg_options: "force-confdef,force-confold"
+    autoclean: "{{ debian_upgrade_autoclean }}"
+    autoremove: false
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: dist_upgrade_result
+  until: dist_upgrade_result is succeeded
+  async: "{{ debian_upgrade_apt_timeout }}"
+  poll: 30
+  when: debian_upgrade_dist_upgrade | bool
+  tags:
+    - dist-upgrade
+
+- name: Dist-upgrade | Remove obsolete packages (autoremove)
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: autoremove_result
+  until: autoremove_result is succeeded
+  when: debian_upgrade_autoremove | bool
+  tags:
+    - dist-upgrade
+
+- name: Dist-upgrade | Install extra packages (post-upgrade)
+  ansible.builtin.apt:
+    name: "{{ debian_upgrade_extra_packages_post }}"
+    state: present
+    update_cache: true
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: extra_post_install_result
+  until: extra_post_install_result is succeeded
+  when: debian_upgrade_extra_packages_post | length > 0
+  tags:
+    - dist-upgrade
+
+- name: Dist-upgrade | Print upgrade summary
+  ansible.builtin.debug:
+    msg:
+      - "Dist-upgrade completed successfully."
+      - "Packages installed : {{ dist_upgrade_result.stdout | regex_findall('newly installed') | length }}"
+      - "Packages upgraded  : {{ dist_upgrade_result.stdout | regex_findall('upgraded') | length }}"
+      - "Packages removed   : {{ dist_upgrade_result.stdout | regex_findall('to remove') | length }}"
+  when: dist_upgrade_result is defined
+  tags:
+    - dist-upgrade
+
+# ============================================================
+# BLOCK 5: Reboot
+# ============================================================
+- name: Reboot | Notify reboot handler
+  ansible.builtin.command:
+    cmd: /bin/true
+  changed_when: true
+  notify:
+    - Reboot host
+    - Print reboot skip warning
+  tags:
+    - reboot
+
+- name: Reboot | Flush reboot handler
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - reboot
+
+# ============================================================
+# BLOCK 6: Post-upgrade verification
+# ============================================================
+- name: Post-upgrade | Skip verification in check mode
+  ansible.builtin.debug:
+    msg: >-
+      Skipping post-upgrade verification because --check mode is active.
+      No real upgrade was performed — OS is still
+      Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }}).
+  when: ansible_check_mode
+  tags:
+    - verify
+
+- name: Post-upgrade | Re-gather facts after reboot
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - "!min"
+      - distribution
+      - distribution_version
+      - distribution_release
+  when:
+    - debian_upgrade_verify_after_upgrade | bool
+    - not ansible_check_mode
+  tags:
+    - verify
+
+- name: Post-upgrade | Verify OS is now Debian {{ debian_upgrade_target_version }}
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == "Debian"
+      - ansible_facts['distribution_major_version'] == debian_upgrade_target_version
+      - ansible_facts['distribution_release'] == debian_upgrade_target_codename
+    fail_msg: >-
+      Post-upgrade verification FAILED.
+      Expected Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }}),
+      but found Debian {{ ansible_facts['distribution_major_version'] }} ({{ ansible_facts['distribution_release'] }}).
+    success_msg: >-
+      Post-upgrade verification PASSED:
+      Host is now running Debian {{ ansible_facts['distribution_version'] }}
+      ({{ ansible_facts['distribution_release'] }}).
+  when:
+    - debian_upgrade_verify_after_upgrade | bool
+    - not ansible_check_mode
+  tags:
+    - verify
+
+- name: Post-upgrade | Check apt is healthy after upgrade
+  ansible.builtin.command:
+    cmd: apt-get check
+  register: apt_check_result
+  changed_when: false
+  failed_when: apt_check_result.rc != 0
+  when:
+    - debian_upgrade_verify_after_upgrade | bool
+    - not ansible_check_mode
+  tags:
+    - verify
+
+- name: Post-upgrade | List packages still in broken/half-installed state
+  ansible.builtin.command:
+    cmd: dpkg --audit
+  register: dpkg_audit_result
+  changed_when: false
+  when: not ansible_check_mode
+  tags:
+    - verify
+
+- name: Post-upgrade | Fail if dpkg audit reports broken packages
+  ansible.builtin.fail:
+    msg: >-
+      dpkg audit found broken or inconsistent packages:
+      {{ dpkg_audit_result.stdout }}
+      Run 'dpkg --configure -a' and 'apt-get -f install' to fix them.
+  when:
+    - not ansible_check_mode
+    - dpkg_audit_result.stdout | length > 0
+  tags:
+    - verify
+
+- name: Post-upgrade | Show kernel version after upgrade
+  ansible.builtin.command:
+    cmd: uname -r
+  register: kernel_version
+  changed_when: false
+  when: not ansible_check_mode
+  tags:
+    - verify
+
+- name: Post-upgrade | Final status report
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "  Debian Upgrade Completed Successfully!"
+      - "=============================================="
+      - "  Host           : {{ inventory_hostname }}"
+      - "  OS             : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+      - "  Codename       : {{ ansible_facts['distribution_release'] }}"
+      - "  Kernel         : {{ kernel_version.stdout }}"
+      - "  Reboot status  : {{ 'Rebooted' if debian_upgrade_allow_reboot else 'Manual reboot required' }}"
+      - "=============================================="
+  when:
+    - debian_upgrade_verify_after_upgrade | bool
+    - not ansible_check_mode
+  tags:
+    - verify

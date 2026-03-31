@@ -1,0 +1,28 @@
+---
+# handlers/main.yml — triggered by notify directives in tasks
+
+- name: Reboot host
+  ansible.builtin.reboot:
+    msg: "Rebooting after Debian dist-upgrade to {{ debian_upgrade_target_codename }}"
+    pre_reboot_delay: "{{ debian_upgrade_reboot_delay }}"
+    post_reboot_delay: 30
+    reboot_timeout: "{{ debian_upgrade_reboot_timeout }}"
+    test_command: uptime
+  when: debian_upgrade_allow_reboot | bool
+
+- name: Print reboot skip warning
+  ansible.builtin.debug:
+    msg: >
+      Reboot was skipped because debian_upgrade_allow_reboot is false.
+      Please reboot the host manually to complete the upgrade to
+      Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }}).
+  when: not (debian_upgrade_allow_reboot | bool)
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+  retries: "{{ debian_upgrade_apt_retries }}"
+  delay: "{{ debian_upgrade_apt_retry_delay }}"
+  register: apt_cache_update_result
+  until: apt_cache_update_result is succeeded

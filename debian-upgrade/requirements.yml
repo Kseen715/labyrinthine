@@ -1,0 +1,39 @@
+---
+# Ansible Galaxy requirements
+# Install with:
+#   ansible-galaxy role install -r requirements.yml
+#   ansible-galaxy collection install -r requirements.yml  (only if collections are listed)
+
+roles:
+  # Used to fully update packages on the current OS version before major upgrade
+  # Latest: 3.1.10 (2025-08-18)
+  - name: robertdebock.update
+    src: robertdebock.update
+    version: "3.1.10"
+
+  # Used to safely reboot the host and wait for it to come back online
+  # Latest: 3.2.7 (2025-07-31)
+  - name: robertdebock.reboot
+    src: robertdebock.reboot
+    version: "3.2.7"
+
+  # Used to verify minimum system requirements before proceeding
+  # Latest: 7.1.7 (2026-02-13)
+  - name: robertdebock.bootstrap
+    src: robertdebock.bootstrap
+    version: "7.1.7"
+
+# No external collections required — all modules used are from ansible.builtin:
+#   - ansible.builtin.apt
+#   - ansible.builtin.dpkg_selections
+#   - ansible.builtin.template
+#   - ansible.builtin.copy
+#   - ansible.builtin.command
+#   - ansible.builtin.reboot
+#   - ansible.builtin.setup
+#   - ansible.builtin.assert
+#   - ansible.builtin.debug
+#   - ansible.builtin.stat
+#   - ansible.builtin.find
+#   - ansible.builtin.replace
+#   - ansible.builtin.meta
