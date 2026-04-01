@@ -3,6 +3,11 @@
 # Usage: make <target> [VERSION=12|13] [LIMIT=host] [TAGS=tag] [EXTRA="-e k=v"]
 # =============================================================================
 
+# Auto-detect venv bin directory so molecule/ansible-* are found without
+# requiring the user to manually activate the venv before running make.
+VENV_BIN      := $(shell python3 -c "import sys, os; print(os.path.join(sys.prefix, 'bin'))" 2>/dev/null)
+export PATH   := $(VENV_BIN):$(PATH)
+
 INVENTORY     ?= inventory/secret_hosts.yml
 PLAYBOOK      ?= upgrade_debian.yml
 REQUIREMENTS  ?= requirements.yml
@@ -193,3 +198,40 @@ clean-galaxy: ## Remove locally installed Galaxy roles and collections
 clean-retry: ## Remove any leftover .retry files from failed playbook runs
 	find . -name "*.retry" -delete
 	@echo "Removed all .retry files."
+
+## Testing
+.PHONY: test
+test: ## Run all Molecule test scenarios
+	cd roles/debian_upgrade && molecule test --all
+
+.PHONY: test-default
+test-default: ## Run default Molecule scenario (Debian 12 → 13)
+	cd roles/debian_upgrade && molecule test -s default
+
+.PHONY: test-already-upgraded
+test-already-upgraded: ## Run already_upgraded scenario
+	cd roles/debian_upgrade && molecule test -s already_upgraded
+
+.PHONY: test-skip-release
+test-skip-release: ## Run skip_release scenario (11 → 13 blocked)
+	cd roles/debian_upgrade && molecule test -s skip_release
+
+.PHONY: test-downgrade
+test-downgrade: ## Run downgrade_protection scenario
+	cd roles/debian_upgrade && molecule test -s downgrade_protection
+
+.PHONY: test-lint
+test-lint: ## Run ansible-lint + yamllint on the role
+	cd roles/debian_upgrade && molecule lint
+
+.PHONY: test-create
+test-create: ## Create Molecule containers without running tests
+	cd roles/debian_upgrade && molecule create
+
+.PHONY: test-destroy
+test-destroy: ## Destroy Molecule containers
+	cd roles/debian_upgrade && molecule destroy --all
+
+.PHONY: test-converge
+test-converge: ## Run converge step only (useful for development)
+	cd roles/debian_upgrade && molecule converge

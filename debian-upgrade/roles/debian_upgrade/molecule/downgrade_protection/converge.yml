@@ -1,0 +1,51 @@
+---
+# Converge playbook for downgrade_protection scenario
+#
+# Runs the role on a Debian 12 (bookworm) host with target_version=11.
+# The role should detect that the host is ABOVE the target version and
+# gracefully skip via meta: end_host (no failure, no changes).
+#
+# Uses the debian_upgrade role directly (with Galaxy deps) so the full
+# role entry point is exercised, same as a real playbook run.
+
+- name: Converge — attempt downgrade from Debian 12 to 11
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Target a LOWER version than the running OS (12 → 11)
+    debian_upgrade_target_version: "11"
+    debian_upgrade_allow_reboot: false
+    debian_upgrade_check_disk_space: false
+    debian_upgrade_fail_if_already_upgraded: false
+
+  pre_tasks:
+    - name: Display current OS info before role execution
+      ansible.builtin.debug:
+        msg:
+          - "Current OS  : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }} ({{ ansible_facts['distribution_release'] }})"
+          - "Target ver  : {{ debian_upgrade_target_version }}"
+          - "Expectation : role should skip gracefully (host is above target)"
+
+    - name: Save marker to prove converge reached this point
+      ansible.builtin.copy:
+        content: "pre-role"
+        dest: /tmp/molecule_downgrade_converge_marker
+        mode: "0644"
+
+  roles:
+    - role: debian_upgrade
+
+  post_tasks:
+    # ---------------------------------------------------------------
+    # If we reach this point the role did NOT call end_host, which
+    # means the downgrade-protection logic failed to trigger.
+    # ---------------------------------------------------------------
+    - name: Fail if role did not skip (downgrade protection not triggered)
+      ansible.builtin.fail:
+        msg: >-
+          The role should have called meta: end_host because the host
+          (Debian {{ ansible_facts['distribution_major_version'] }}) is above
+          the target version ({{ debian_upgrade_target_version }}).
+          Downgrade protection did not work as expected.

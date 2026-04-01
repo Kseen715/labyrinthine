@@ -150,15 +150,15 @@
 - name: Pre-flight | Enforce sequential upgrade path (N → N+1)
   ansible.builtin.assert:
     that:
-      - (debian_upgrade_target_version | int) == (_debian_upgrade_current_version | int + 1)
+      - (debian_upgrade_target_version | int) == ((_debian_upgrade_current_version | int) + 1)
     fail_msg: >-
       Debian only supports upgrading from one release to the next (N → N+1).
       You are trying to jump from {{ _debian_upgrade_current_version }}
       ({{ debian_upgrade_codenames[_debian_upgrade_current_version] }})
       to {{ debian_upgrade_target_version }}
       ({{ debian_upgrade_target_codename }}).
-      Upgrade to Debian {{ (_debian_upgrade_current_version | int + 1) }}
-      ({{ debian_upgrade_codenames[(_debian_upgrade_current_version | int + 1) | string] | default('unknown') }})
+      Upgrade to Debian {{ ((_debian_upgrade_current_version | int) + 1) }}
+      ({{ debian_upgrade_codenames[((_debian_upgrade_current_version | int) + 1) | string] | default('unknown') }})
       first, or set `debian_upgrade_allow_skip_release: true` to override
       (unsupported and may break the system).
     success_msg: >-
@@ -178,7 +178,7 @@
       Proceeding because `debian_upgrade_allow_skip_release` is true.
   when:
     - debian_upgrade_allow_skip_release | default(false) | bool
-    - (debian_upgrade_target_version | int) > (_debian_upgrade_current_version | int + 1)
+    - (debian_upgrade_target_version | int) > ((_debian_upgrade_current_version | int) + 1)
   tags:
     - always
     - preflight
@@ -248,7 +248,7 @@
       - "  Host           : {{ inventory_hostname }}"
       - "  From version   : Debian {{ _debian_upgrade_current_version }} ({{ ansible_facts['distribution_release'] }})"
       - "  To version     : Debian {{ debian_upgrade_target_version }} ({{ debian_upgrade_target_codename }})"
-      - "  Upgrade path   : {{ 'sequential (N→N+1)' if (debian_upgrade_target_version | int) == (_debian_upgrade_current_version | int + 1) else 'SKIP-RELEASE ⚠️' }}"
+      - "  Upgrade path   : {{ 'sequential (N→N+1)' if (debian_upgrade_target_version | int) == ((_debian_upgrade_current_version | int) + 1) else 'SKIP-RELEASE ⚠️' }}"
       - "  Auto-reboot    : {{ debian_upgrade_allow_reboot }}"
       - "  Pre-update     : {{ debian_upgrade_pre_update }}"
       - "  Backup sources : {{ debian_upgrade_backup_sources }}"

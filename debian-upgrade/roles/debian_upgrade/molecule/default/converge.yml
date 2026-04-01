@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# Converge playbook — default Molecule scenario
+#
+# Runs the debian_upgrade role against a Debian 12 (bookworm) container with
+# --tags "preflight,sources" (set in molecule.yml provisioner.options.tags).
+#
+# This tests:
+#   - BLOCK 0: Target version resolution & codename lookup
+#   - BLOCK 1: All pre-flight validations (OS check, version check, etc.)
+#   - BLOCK 3: APT sources rewrite (backup, template deploy, cache update)
+#
+# Heavy operations (dist-upgrade, reboot, post-upgrade verification) are
+# excluded by tag filtering so the test runs quickly and doesn't depend on
+# the target release repos being fully functional.
+# =============================================================================
+
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    # Target Debian 13 (trixie) — upgrading from Debian 12 in the container
+    debian_upgrade_target_version: "13"
+
+    # Containers cannot reboot
+    debian_upgrade_allow_reboot: false
+
+    # Container root filesystem is small; skip the disk space check
+    debian_upgrade_check_disk_space: false
+
+  roles:
+    - role: debian_upgrade

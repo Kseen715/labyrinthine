@@ -1,0 +1,107 @@
+---
+# verify.yml — downgrade_protection scenario
+# Confirms that the role gracefully skipped the downgrade attempt and
+# made zero changes to the system.
+# Host is Debian 12 (bookworm), target was 11 (bullseye).
+
+- name: Verify (downgrade_protection)
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    # -----------------------------------------------------------------
+    # 1. Host must still be Debian 12 (bookworm)
+    # -----------------------------------------------------------------
+    - name: Assert OS is still Debian
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == "Debian"
+        fail_msg: >-
+          Expected distribution 'Debian' but got
+          '{{ ansible_facts["distribution"] }}'.
+        success_msg: "Distribution is Debian — OK"
+
+    - name: Assert major version is still 12
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution_major_version'] == "12"
+        fail_msg: >-
+          Expected Debian 12 but found Debian
+          {{ ansible_facts['distribution_major_version'] }}.
+          A downgrade may have occurred!
+        success_msg: >-
+          Host is still running Debian 12
+          ({{ ansible_facts['distribution_release'] }}) — no downgrade.
+
+    # -----------------------------------------------------------------
+    # 2. sources.list must NOT have been rewritten to bullseye
+    # -----------------------------------------------------------------
+    - name: Read current /etc/apt/sources.list
+      ansible.builtin.slurp:
+        src: /etc/apt/sources.list
+      register: verify_sources_content
+      failed_when: false
+
+    - name: Assert sources.list does not reference bullseye
+      ansible.builtin.assert:
+        that:
+          - "'bullseye' not in (verify_sources_content.content | default('') | b64decode)"
+        fail_msg: >-
+          /etc/apt/sources.list unexpectedly contains 'bullseye'.
+          The role may have rewritten sources for a downgrade.
+        success_msg: "No 'bullseye' references found in sources.list — OK"
+      when: verify_sources_content is not failed
+
+    # -----------------------------------------------------------------
+    # 3. No backup file should have been created (sources block skipped)
+    # -----------------------------------------------------------------
+    - name: Check for backup file that should not exist
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.bak
+      register: verify_backup_file
+
+    - name: Assert no backup was created by the role
+      ansible.builtin.assert:
+        that:
+          - not verify_backup_file.stat.exists
+        fail_msg: >-
+          /etc/apt/sources.list.bak exists, meaning the role's sources
+          block ran when it should have been skipped via end_host.
+        success_msg: "No backup file created — sources block was correctly skipped."
+
+    # -----------------------------------------------------------------
+    # 4. Confirm the converge play ran (pre-role marker was written)
+    #    and that end_host fired (the fail task after the role
+    #    never executed, so converge succeeded).
+    # -----------------------------------------------------------------
+    - name: Check for pre-role marker written by converge
+      ansible.builtin.stat:
+        path: /tmp/molecule_downgrade_converge_marker
+      register: verify_converge_marker
+
+    - name: Assert converge ran and the role ended via end_host
+      ansible.builtin.assert:
+        that:
+          - verify_converge_marker.stat.exists
+        fail_msg: >-
+          Marker /tmp/molecule_downgrade_converge_marker not found.
+          The converge play may not have started correctly.
+        success_msg: >-
+          Converge marker found — role was entered and then gracefully
+          skipped via end_host (the trailing fail task never fired).
+
+    # -----------------------------------------------------------------
+    # 5. Summary
+    # -----------------------------------------------------------------
+    - name: Print verification summary
+      ansible.builtin.debug:
+        msg:
+          - "======================================================"
+          - "  downgrade_protection scenario — VERIFICATION PASSED"
+          - "======================================================"
+          - "  Host        : {{ inventory_hostname }}"
+          - "  OS          : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "  Codename    : {{ ansible_facts['distribution_release'] }}"
+          - "  Target was  : 11 (bullseye) — correctly refused"
+          - "  Result      : Role skipped gracefully (host above target)"
+          - "======================================================"

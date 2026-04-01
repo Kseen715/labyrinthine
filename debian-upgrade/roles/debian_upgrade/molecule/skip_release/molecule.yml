@@ -1,0 +1,52 @@
+---
+# Molecule scenario: skip_release
+# Validates that upgrading from Debian 12 → 14 (skipping 13) is blocked
+# when debian_upgrade_allow_skip_release is false.
+# Uses geerlingguy/docker-debian12-ansible which is already cached locally.
+
+dependency:
+  name: shell
+  command: "true"
+
+driver:
+  name: docker
+
+platforms:
+  - name: debian12-skip-release
+    image: geerlingguy/docker-debian12-ansible:latest
+    command: ""
+    privileged: true
+    pre_build_image: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callbacks_enabled: "default"
+      interpreter_python: auto_silent
+      deprecation_warnings: false
+  env:
+    ANSIBLE_ROLES_PATH: "../../..:~/.ansible/roles"
+    ANSIBLE_NOCOWS: "1"
+
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - verify
+    - cleanup
+    - destroy
+
+verifier:
+  name: ansible

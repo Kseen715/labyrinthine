@@ -1,0 +1,38 @@
+---
+# Prepare the geerlingguy/docker-debian12-ansible container for the
+# already_upgraded scenario.  Python and apt are already available in
+# this image, so no raw bootstrapping is needed.
+
+- name: Prepare (already_upgraded)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display detected OS information
+      ansible.builtin.debug:
+        msg:
+          - "Distribution : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "Codename     : {{ ansible_facts['distribution_release'] }}"
+
+    # Save a snapshot of the original sources.list so verify.yml can
+    # confirm nothing was modified during converge.
+    - name: Check if /etc/apt/sources.list exists
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list
+      register: original_sources_stat
+
+    - name: Save original sources.list for later comparison
+      ansible.builtin.copy:
+        src: /etc/apt/sources.list
+        dest: /tmp/molecule_original_sources.list
+        remote_src: true
+        mode: "0644"
+      when: original_sources_stat.stat.exists
+
+    - name: Create empty marker if sources.list does not exist
+      ansible.builtin.copy:
+        content: "# sources.list did not exist on the original image\n"
+        dest: /tmp/molecule_original_sources.list
+        mode: "0644"
+      when: not original_sources_stat.stat.exists

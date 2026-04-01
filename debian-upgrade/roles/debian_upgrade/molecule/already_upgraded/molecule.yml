@@ -1,0 +1,52 @@
+---
+# Molecule scenario: already_upgraded
+# Verifies that the role gracefully skips when the host is already
+# running the target Debian version (12/bookworm → target 12).
+# Uses geerlingguy/docker-debian12-ansible which is already cached locally.
+
+dependency:
+  name: shell
+  command: "echo 'Skipping Galaxy dependencies — not needed for this scenario.'"
+
+driver:
+  name: docker
+
+platforms:
+  - name: debian12-already-upgraded
+    image: geerlingguy/docker-debian12-ansible:latest
+    command: ""
+    privileged: true
+    pre_build_image: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callbacks_enabled: "default"
+      interpreter_python: auto_silent
+      deprecation_warnings: false
+  env:
+    ANSIBLE_ROLES_PATH: "../../..:~/.ansible/roles"
+    ANSIBLE_NOCOWS: "1"
+
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - verify
+    - cleanup
+    - destroy
+
+verifier:
+  name: ansible

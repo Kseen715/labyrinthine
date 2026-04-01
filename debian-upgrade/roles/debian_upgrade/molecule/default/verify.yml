@@ -1,0 +1,168 @@
+---
+# Verify playbook for the default Molecule scenario.
+# Confirms that the preflight + sources stages ran correctly:
+#   - /etc/apt/sources.list was rewritten for Debian 13 (trixie)
+#   - The old codename (bookworm) is no longer referenced
+#   - A backup of the original sources.list was created
+#   - Expected mirrors and components are present
+
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+  tags:
+    - always
+  tasks:
+    # ------------------------------------------------------------------
+    # Read the rewritten sources.list
+    # ------------------------------------------------------------------
+    - name: Read /etc/apt/sources.list
+      ansible.builtin.slurp:
+        src: /etc/apt/sources.list
+      register: sources_list_raw
+
+    - name: Decode sources.list content
+      ansible.builtin.set_fact:
+        sources_list: "{{ sources_list_raw.content | b64decode }}"
+
+    - name: Show sources.list for debugging
+      ansible.builtin.debug:
+        var: sources_list
+
+    # ------------------------------------------------------------------
+    # Target codename assertions
+    # ------------------------------------------------------------------
+    - name: Verify sources.list contains trixie codename
+      ansible.builtin.assert:
+        that:
+          - "'trixie' in sources_list"
+        fail_msg: >-
+          /etc/apt/sources.list does not contain 'trixie'.
+          Content: {{ sources_list }}
+        success_msg: "/etc/apt/sources.list correctly references 'trixie'."
+
+    - name: Extract active (non-comment) deb lines from sources.list
+      ansible.builtin.set_fact:
+        active_deb_lines: >-
+          {{ sources_list.split('\n')
+             | reject('match', '^\s*#')
+             | reject('match', '^\s*$')
+             | select('match', '^\s*deb')
+             | list }}
+
+    - name: Verify no active deb lines reference bookworm codename
+      ansible.builtin.assert:
+        that:
+          - "active_deb_lines | select('search', 'bookworm') | list | length == 0"
+        fail_msg: >-
+          /etc/apt/sources.list still has active deb lines referencing 'bookworm':
+          {{ active_deb_lines | select('search', 'bookworm') | list }}
+        success_msg: "/etc/apt/sources.list has no active deb lines referencing 'bookworm' (comments are OK)."
+
+    # ------------------------------------------------------------------
+    # Backup verification
+    # ------------------------------------------------------------------
+    - name: Stat the sources.list backup
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.bak
+      register: sources_backup
+
+    - name: Assert backup file exists
+      ansible.builtin.assert:
+        that:
+          - sources_backup.stat.exists
+        fail_msg: >-
+          Backup /etc/apt/sources.list.bak was not created.
+          The role should have backed up the original sources.list.
+        success_msg: "Backup /etc/apt/sources.list.bak exists."
+
+    - name: Read backup file
+      ansible.builtin.slurp:
+        src: /etc/apt/sources.list.bak
+      register: backup_raw
+      when: sources_backup.stat.exists
+
+    - name: Verify backup still contains original bookworm codename
+      ansible.builtin.assert:
+        that:
+          - "'bookworm' in (backup_raw.content | b64decode)"
+        fail_msg: >-
+          Backup does not contain the original 'bookworm' codename.
+          It may not be a genuine copy of the pre-upgrade sources.list.
+        success_msg: "Backup correctly contains the original 'bookworm' codename."
+      when: sources_backup.stat.exists
+
+    # ------------------------------------------------------------------
+    # Mirror assertions
+    # ------------------------------------------------------------------
+    - name: Verify sources.list references the main Debian mirror
+      ansible.builtin.assert:
+        that:
+          - "'deb.debian.org' in sources_list"
+        fail_msg: "sources.list does not reference deb.debian.org"
+        success_msg: "sources.list correctly references deb.debian.org."
+
+    - name: Verify sources.list references the security mirror
+      ansible.builtin.assert:
+        that:
+          - "'security.debian.org' in sources_list"
+        fail_msg: "sources.list does not reference security.debian.org"
+        success_msg: "sources.list correctly references security.debian.org."
+
+    # ------------------------------------------------------------------
+    # Component assertions
+    # ------------------------------------------------------------------
+    - name: Verify sources.list includes all expected APT components
+      ansible.builtin.assert:
+        that:
+          - "'main' in sources_list"
+          - "'contrib' in sources_list"
+          - "'non-free' in sources_list"
+        fail_msg: >-
+          One or more expected APT components (main, contrib, non-free) are
+          missing from sources.list.
+        success_msg: "All expected APT components found in sources.list."
+
+    # ------------------------------------------------------------------
+    # Repository line assertions
+    # ------------------------------------------------------------------
+    - name: Verify trixie-security entry exists
+      ansible.builtin.assert:
+        that:
+          - "'trixie-security' in sources_list"
+        fail_msg: "Security repository entry (trixie-security) not found."
+        success_msg: "Security repository entry for trixie found."
+
+    - name: Verify trixie-updates entry exists
+      ansible.builtin.assert:
+        that:
+          - "'trixie-updates' in sources_list"
+        fail_msg: "Updates repository entry (trixie-updates) not found."
+        success_msg: "Updates repository entry for trixie found."
+
+    # ------------------------------------------------------------------
+    # Verify deb-src lines are present (template generates both)
+    # ------------------------------------------------------------------
+    - name: Verify deb-src lines exist
+      ansible.builtin.assert:
+        that:
+          - "'deb-src' in sources_list"
+        fail_msg: "No deb-src lines found — source repositories are missing."
+        success_msg: "Source repository (deb-src) lines present."
+
+    # ------------------------------------------------------------------
+    # Final summary
+    # ------------------------------------------------------------------
+    - name: Print verification summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "  Default scenario verification PASSED"
+          - "=============================================="
+          - "  sources.list rewritten for trixie    : YES"
+          - "  Old codename (bookworm) in deb lines : NO"
+          - "  Backup created                       : YES"
+          - "  Mirrors correct                      : YES"
+          - "  Components present                   : YES"
+          - "  Security + updates entries           : YES"
+          - "=============================================="

@@ -1,0 +1,125 @@
+---
+# Converge playbook for skip_release scenario
+#
+# Attempts to upgrade from Debian 12 (bookworm) directly to Debian 14 (forky),
+# skipping Debian 13 (trixie), with allow_skip_release=false.
+# The role MUST reject this with an assertion error enforcing the sequential
+# N → N+1 upgrade path.
+#
+# We use include_tasks to load the role's tasks directly, bypassing Galaxy
+# dependency resolution (robertdebock.*) so the test stays fast and isolated.
+# A block/rescue construct catches the expected failure and validates its message.
+#
+# NOTE: Do NOT use vars_files to load defaults/main.yml here — in Ansible,
+# vars_files has higher precedence than play vars, so defaults would silently
+# override our target_version setting.
+
+- name: Converge — skip-release must be blocked
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Target two versions ahead (12 → 14) — must be rejected
+    debian_upgrade_target_version: "14"
+    debian_upgrade_allow_skip_release: false
+
+    # Codename map (required by the role's resolve tasks)
+    debian_upgrade_codenames:
+      "8": "jessie"
+      "9": "stretch"
+      "10": "buster"
+      "11": "bullseye"
+      "12": "bookworm"
+      "13": "trixie"
+      "14": "forky"
+
+    # Auto-derived codename (same logic as defaults/main.yml)
+    debian_upgrade_target_codename: "{{ debian_upgrade_codenames[debian_upgrade_target_version | string] | default('') }}"
+
+    # Safety: disable operations that cannot work in containers
+    debian_upgrade_allow_reboot: false
+    debian_upgrade_check_disk_space: false
+
+    # Disable heavy stages (they should never be reached anyway,
+    # because the sequential-path assertion fires during preflight)
+    debian_upgrade_pre_update: false
+    debian_upgrade_dist_upgrade: false
+    debian_upgrade_autoremove: false
+    debian_upgrade_autoclean: true
+    debian_upgrade_verify_after_upgrade: false
+
+    # Do not fail on already-upgraded — we want the skip-release check
+    debian_upgrade_fail_if_already_upgraded: false
+
+    # Empty lists / paths expected by role tasks
+    debian_upgrade_held_packages: []
+    debian_upgrade_extra_packages_pre: []
+    debian_upgrade_extra_packages_post: []
+    debian_upgrade_backup_sources: true
+    debian_upgrade_backup_path: "/etc/apt/sources.list.bak"
+    debian_upgrade_sources_list_path: "/etc/apt/sources.list"
+    debian_upgrade_sources_list_d_path: "/etc/apt/sources.list.d"
+    debian_upgrade_min_free_disk_mb: 4096
+    debian_upgrade_apt_mirror: "deb.debian.org"
+    debian_upgrade_apt_security_mirror: "security.debian.org"
+    debian_upgrade_apt_components: "main contrib non-free non-free-firmware"
+    debian_upgrade_apt_retries: 3
+    debian_upgrade_apt_retry_delay: 30
+    debian_upgrade_apt_timeout: 3600
+    debian_upgrade_reboot_timeout: 600
+    debian_upgrade_reboot_delay: 5
+
+  tasks:
+    # ------------------------------------------------------------------
+    # Attempt the upgrade inside a block so we can rescue the failure
+    # ------------------------------------------------------------------
+    - name: Attempt skip-release upgrade (expected to fail)
+      block:
+        - name: Run debian_upgrade role tasks
+          ansible.builtin.include_tasks:
+            file: ../../tasks/main.yml
+
+        - name: Role should have failed but did not
+          ansible.builtin.fail:
+            msg: >-
+              BUG: Expected the role to fail due to skip-release enforcement
+              (Debian 12 → 14 with allow_skip_release=false), but it
+              completed successfully.  The sequential upgrade guard is broken.
+
+      rescue:
+        # --------------------------------------------------------------
+        # Validate that the failure came from the sequential-path assert
+        # --------------------------------------------------------------
+        - name: Confirm failure was from sequential upgrade enforcement
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result is defined
+              - ansible_failed_result.msg is defined
+              - >-
+                'N+1' in (ansible_failed_result.msg | string)
+                or 'only supports' in (ansible_failed_result.msg | string)
+                or 'skip_release' in (ansible_failed_result.msg | string)
+            fail_msg: >-
+              Role failed, but NOT with the expected skip-release error.
+              Actual error: {{ ansible_failed_result.msg | default('unknown') }}
+            success_msg: >-
+              Role correctly enforced sequential upgrade path.
+              Skip-release from Debian 12 to 14 was blocked as expected.
+
+        - name: Display the captured error for CI logs
+          ansible.builtin.debug:
+            msg: "{{ ansible_failed_result.msg | default('no message') }}"
+
+        # Write a marker so verify.yml can confirm the block was hit
+        - name: Write marker file to confirm skip-release was blocked
+          ansible.builtin.copy:
+            content: |
+              skip-release-blocked
+              from={{ ansible_facts['distribution_major_version'] }}
+              to=14
+              allow_skip_release=false
+            dest: /tmp/molecule_skip_release_blocked
+            owner: root
+            group: root
+            mode: "0644"

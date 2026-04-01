@@ -1,0 +1,52 @@
+---
+# Molecule scenario: downgrade_protection
+# Verifies that targeting a LOWER version than the current OS is
+# gracefully skipped (the role calls meta: end_host instead of failing).
+# Uses a Debian 12 (bookworm) container with target_version=11.
+
+dependency:
+  name: shell
+  command: "true"
+
+driver:
+  name: docker
+
+platforms:
+  - name: debian12-downgrade
+    image: geerlingguy/docker-debian12-ansible:latest
+    command: ""
+    privileged: true
+    pre_build_image: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callbacks_enabled: "default"
+      interpreter_python: auto_silent
+      deprecation_warnings: false
+  env:
+    ANSIBLE_ROLES_PATH: "../../..:~/.ansible/roles"
+    ANSIBLE_NOCOWS: "1"
+
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - verify
+    - cleanup
+    - destroy
+
+verifier:
+  name: ansible

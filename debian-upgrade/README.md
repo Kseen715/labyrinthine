@@ -1,6 +1,6 @@
 # Debian Upgrade Playbook
 
-Ansible playbook to automatically upgrade **Debian 11 (Bullseye)** or **Debian 12 (Bookworm)** to **Debian 13 (Trixie)** using roles from Ansible Galaxy.
+Ansible playbook to automatically upgrade **Debian** to a chosen target release (default: **Debian 13 — Trixie**) using roles from Ansible Galaxy. The target version is configurable and the role enforces safe, sequential upgrade paths.
 
 ---
 
@@ -12,10 +12,12 @@ Ansible playbook to automatically upgrade **Debian 11 (Bullseye)** or **Debian 1
 - [Quick Start](#quick-start)
 - [Inventory Setup](#inventory-setup)
 - [Variables Reference](#variables-reference)
+- [Upgrade Path Safety](#upgrade-path-safety)
 - [Tags](#tags)
 - [Galaxy Dependencies](#galaxy-dependencies)
 - [Upgrade Process](#upgrade-process)
 - [Examples](#examples)
+- [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Security Considerations](#security-considerations)
 - [License](#license)
@@ -26,11 +28,11 @@ Ansible playbook to automatically upgrade **Debian 11 (Bullseye)** or **Debian 1
 
 This playbook performs a safe, automated major version upgrade of Debian Linux. It:
 
-1. Verifies the current OS is Debian 11 or 12
-2. Skips hosts already on Debian 13 without failing
+1. Resolves the target codename automatically from `debian_upgrade_target_version` using a built-in codename map
+2. Validates the upgrade path — skips hosts already at or above the target, blocks downgrades, and enforces sequential (N→N+1) upgrades by default
 3. Fully updates all packages on the current version before switching sources
 4. Backs up `/etc/apt/sources.list` and all `sources.list.d` files
-5. Rewrites APT sources to point to the Debian 13 (Trixie) repositories
+5. Rewrites APT sources to point to the target version's repositories
 6. Runs `apt-get upgrade` followed by `apt-get dist-upgrade`
 7. Removes obsolete packages with `autoremove`
 8. Reboots the host (configurable) and waits for it to return
@@ -46,13 +48,13 @@ Upgrades are performed **one host at a time** (`serial: 1`) to prevent simultane
 |---|---|
 | Ansible | >= 2.14 |
 | Python | >= 3.9 |
-| Target OS | Debian 11 (Bullseye) or Debian 12 (Bookworm) |
+| Target OS | Debian 8+ (any version below the chosen target) |
 | Target user | `root` or a user with passwordless `sudo` |
 | Free disk space | >= 4 GB on `/` (configurable) |
 
 Install Ansible on the control node:
 
-```bash
+```
 pip install "ansible>=2.14" ansible-lint
 ```
 
@@ -62,8 +64,9 @@ pip install "ansible>=2.14" ansible-lint
 
 ```
 debian-upgrade/
-├── requirements.yml                   # Ansible Galaxy roles & collections
+├── requirements.yml                   # Ansible Galaxy roles
 ├── upgrade_debian.yml                 # Main playbook
+├── Makefile                           # Convenience targets
 ├── inventory/
 │   └── hosts.yml                      # Inventory example
 └── roles/
@@ -76,8 +79,14 @@ debian-upgrade/
         │   └── main.yml               # Galaxy metadata & role dependencies
         ├── tasks/
         │   └── main.yml               # Full upgrade task list
-        └── templates/
-            └── sources.list.j2        # Jinja2 template for new APT sources
+        ├── templates/
+        │   └── sources.list.j2        # Jinja2 template for new APT sources
+        └── molecule/
+            ├── requirements.txt       # Molecule test dependencies
+            ├── default/               # 12→13 sources rewrite scenario
+            ├── already_upgraded/      # Skip-on-target scenario
+            ├── skip_release/          # 11→13 blocked scenario
+            └── downgrade_protection/  # 13→12 skip scenario
 ```
 
 ---
@@ -86,23 +95,14 @@ debian-upgrade/
 
 ### 1. Install Galaxy dependencies
 
-Roles and collections must be installed **separately**:
-
-```bash
-# Install Galaxy roles
-ansible-galaxy role install -r requirements.yml
-
-# Install Galaxy collections
-ansible-galaxy collection install -r requirements.yml
 ```
-
-> **Why two commands?** `ansible-galaxy install` only installs roles.
-> Collections require `ansible-galaxy collection install`.
+ansible-galaxy role install -r requirements.yml
+```
 
 ### 1a. (Alternative) Use the Makefile
 
-```bash
-make install        # installs both roles and collections in one shot
+```
+make install        # installs Galaxy roles
 make install-force  # force-reinstall (useful after requirements.yml changes)
 ```
 
@@ -110,7 +110,7 @@ make install-force  # force-reinstall (useful after requirements.yml changes)
 
 Edit `inventory/hosts.yml` and replace the example IPs with your actual hosts:
 
-```yaml
+```
 debian_hosts:
   hosts:
     my-server:
@@ -120,7 +120,7 @@ debian_hosts:
 
 ### 3. Test connectivity
 
-```bash
+```
 ansible -i inventory/hosts.yml debian_hosts -m ping
 # or via Makefile:
 make ping INVENTORY=inventory/hosts.yml
@@ -128,7 +128,7 @@ make ping INVENTORY=inventory/hosts.yml
 
 ### 4. Dry-run (no changes)
 
-```bash
+```
 ansible-playbook -i inventory/hosts.yml upgrade_debian.yml --check --diff
 # or via Makefile:
 make check INVENTORY=inventory/hosts.yml
@@ -136,10 +136,19 @@ make check INVENTORY=inventory/hosts.yml
 
 ### 5. Run the upgrade
 
-```bash
-ansible-playbook -i inventory/hosts.yml upgrade_debian.yml
-# or via Makefile:
-make run INVENTORY=inventory/hosts.yml
+```
+# Upgrade to Debian 13 (default)
+make run
+
+# Upgrade to Debian 12
+make run VERSION=12
+
+# Upgrade to Debian 14
+make run VERSION=14
+
+# Or use ansible-playbook directly:
+ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
+  -e "debian_upgrade_target_version=12"
 ```
 
 ---
@@ -151,6 +160,7 @@ A `Makefile` is included for convenience. All targets accept optional overrides:
 ```
 INVENTORY   — path to inventory file  (default: inventory/secret_hosts.yml)
 LIMIT       — host or group to target (default: debian_hosts)
+VERSION     — target Debian version   (default: 13)
 TAGS        — comma-separated tags    (default: none)
 SKIP_TAGS   — tags to skip            (default: none)
 EXTRA       — extra -e arguments      (default: none)
@@ -158,32 +168,50 @@ EXTRA       — extra -e arguments      (default: none)
 
 | Target | Description |
 |---|---|
-| `make install` | Install Galaxy roles **and** collections |
+| `make install` | Install Galaxy roles |
 | `make install-roles` | Install Galaxy roles only |
-| `make install-collections` | Install Galaxy collections only |
 | `make install-force` | Force-reinstall everything |
 | `make ping` | Test SSH connectivity (`ansible -m ping`) |
 | `make facts` | Show OS facts from all hosts |
 | `make os-check` | Print `/etc/os-release` from all hosts |
 | `make check` | Dry-run with `--check --diff` |
-| `make run` | Apply the full upgrade playbook |
+| `make check VERSION=12` | Dry-run targeting Debian 12 |
+| `make check-12` | Dry-run targeting Debian 12 (shorthand) |
+| `make check-13` | Dry-run targeting Debian 13 (shorthand) |
+| `make check-14` | Dry-run targeting Debian 14 (shorthand) |
+| `make run` | Apply the full upgrade playbook (default: Debian 13) |
+| `make run VERSION=12` | Apply the full upgrade to Debian 12 |
+| `make run VERSION=14` | Apply the full upgrade to Debian 14 |
+| `make upgrade-to-12` | Upgrade to Debian 12 (shorthand) |
+| `make upgrade-to-13` | Upgrade to Debian 13 (shorthand) |
+| `make upgrade-to-14` | Upgrade to Debian 14 (shorthand) |
 | `make run-no-reboot` | Full upgrade, skip automatic reboot |
 | `make preflight` | Run pre-flight checks only (check mode) |
-| `make sources` | Rewrite APT sources to Trixie only |
+| `make sources` | Rewrite APT sources to target version only |
 | `make dist-upgrade` | Run dist-upgrade stage only |
 | `make verify` | Post-upgrade verification only |
 | `make reboot-hosts` | Manually reboot hosts and wait |
 | `make lint` | Lint with `ansible-lint` |
 | `make syntax-check` | Syntax check (no SSH needed) |
-| `make clean-galaxy` | Remove installed roles and collections |
+| `make clean-galaxy` | Remove installed roles |
+| `make test` | Run all Molecule test scenarios |
+| `make test-default` | Run the `default` Molecule scenario (12→13) |
+| `make test-already-upgraded` | Run the `already_upgraded` scenario |
+| `make test-skip-release` | Run the `skip_release` scenario (11→13 blocked) |
+| `make test-downgrade` | Run the `downgrade_protection` scenario |
+| `make test-converge` | Run Molecule converge only (no verify/destroy) |
+| `make test-lint` | Run linting inside the Molecule environment |
 
 ### Examples
 
-```bash
+```
 # Dry-run on a single host
 make check LIMIT=debian-server-01
 
-# Full upgrade, no reboot
+# Upgrade a single host to Debian 12
+make run VERSION=12 LIMIT=debian-server-01
+
+# Full upgrade to Debian 13, no reboot
 make run LIMIT=debian-server-01 EXTRA='-e debian_upgrade_allow_reboot=false'
 
 # Only rewrite sources (skip upgrade)
@@ -191,6 +219,9 @@ make tags TAGS=sources LIMIT=debian-server-01
 
 # Use a custom inventory
 make run INVENTORY=inventory/secret_hosts.yml
+
+# Run all Molecule tests
+make test
 ```
 
 ---
@@ -199,7 +230,7 @@ make run INVENTORY=inventory/secret_hosts.yml
 
 ### Basic inventory (`inventory/hosts.yml`)
 
-```yaml
+```
 all:
   vars:
     ansible_user: root
@@ -216,7 +247,7 @@ all:
 
 ### Production inventory (manual reboot)
 
-```yaml
+```
 debian_hosts_production:
   vars:
     debian_upgrade_allow_reboot: false  # reboot manually at a maintenance window
@@ -227,7 +258,7 @@ debian_hosts_production:
 
 ### Using SSH jump host
 
-```yaml
+```
 all:
   vars:
     ansible_ssh_common_args: "-o ProxyJump=jumphost.example.com"
@@ -243,10 +274,10 @@ All variables are defined in `roles/debian_upgrade/defaults/main.yml` and can be
 
 | Variable | Default | Description |
 |---|---|---|
-| `debian_upgrade_target_version` | `"13"` | Target Debian major version |
-| `debian_upgrade_target_codename` | `"trixie"` | Target Debian codename |
-| `debian_upgrade_supported_versions` | `["11", "12"]` | Allowed source versions |
-| `debian_upgrade_codenames` | `{11: bullseye, 12: bookworm, 13: trixie}` | Codename lookup map |
+| `debian_upgrade_target_version` | `"13"` | Target Debian major version (primary input) |
+| `debian_upgrade_target_codename` | *(auto-derived)* | Target Debian codename — automatically derived from `debian_upgrade_codenames[debian_upgrade_target_version]`. Normally you do not need to set this manually. |
+| `debian_upgrade_codenames` | `{8: jessie, 9: stretch, 10: buster, 11: bullseye, 12: bookworm, 13: trixie, 14: forky}` | Codename lookup map used to resolve `debian_upgrade_target_codename` from the version number |
+| `debian_upgrade_allow_skip_release` | `false` | Allow skipping releases (e.g. 11→13). When `false`, only sequential N→N+1 upgrades are permitted. |
 
 ### APT sources
 
@@ -304,6 +335,41 @@ All variables are defined in `roles/debian_upgrade/defaults/main.yml` and can be
 
 ---
 
+## Upgrade Path Safety
+
+Debian only supports upgrading **one major version at a time** (N→N+1). This role enforces that constraint by default to prevent broken systems.
+
+### Sequential upgrade enforcement
+
+When `debian_upgrade_allow_skip_release` is `false` (the default), the role ensures that the target version is exactly one major version above the current version. For example:
+
+- **Debian 11→12** ✅ — sequential, allowed
+- **Debian 12→13** ✅ — sequential, allowed
+- **Debian 11→13** ❌ — blocked (skips version 12)
+
+If you need to go from Debian 11 to Debian 13, run the playbook twice — first targeting version 12, then targeting version 13.
+
+### Skip-release override
+
+Set `debian_upgrade_allow_skip_release: true` to bypass the sequential enforcement:
+
+```
+ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
+  -e "debian_upgrade_target_version=13" \
+  -e "debian_upgrade_allow_skip_release=true"
+```
+
+> **Warning:** Skipping releases is **unsupported by Debian** and may break your system. Use at your own risk.
+
+### Already-at-target and downgrade protection
+
+The role handles edge cases gracefully:
+
+- **Already at target version** — the host is skipped with a message (no error, no changes).
+- **Above target version** — if a host is already running a version newer than the target (e.g. host is on Debian 13 and target is 12), the host is skipped gracefully. Downgrades are never attempted.
+
+---
+
 ## Tags
 
 You can run individual stages using Ansible tags:
@@ -312,14 +378,14 @@ You can run individual stages using Ansible tags:
 |---|---|
 | `preflight` | Pre-flight checks (OS version, disk space, apt lock) |
 | `pre-upgrade` | Update current packages before switching sources |
-| `sources` | Rewrite APT sources to Trixie |
+| `sources` | Rewrite APT sources to target version |
 | `dist-upgrade` | Run `apt-get upgrade` + `apt-get dist-upgrade` |
 | `reboot` | Reboot the host |
 | `verify` | Post-upgrade version and health checks |
 
 ### Examples
 
-```bash
+```
 # Only run pre-flight checks
 ansible-playbook -i inventory/hosts.yml upgrade_debian.yml --tags preflight
 
@@ -347,13 +413,13 @@ No external collections are required — every module used in this playbook is f
 
 Install roles:
 
-```bash
+```
 ansible-galaxy role install -r requirements.yml
 ```
 
 Or via the Makefile:
 
-```bash
+```
 make install
 ```
 
@@ -363,16 +429,25 @@ make install
 
 ```
 ┌──────────────────────────────────────────────────────┐
+│                Resolve & Validate                    │
+│  • Resolve target codename from version number       │
+│    (debian_upgrade_target_version → codename map)    │
+│  • Already at target version? → skip host            │
+│  • Above target version? → skip host (no downgrade)  │
+│  • Sequential path check (N→N+1 enforced by default) │
+│    — blocked if skip-release not allowed              │
+└────────────────────────┬─────────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────────┐
 │                  Pre-flight Checks                   │
 │  • Assert OS = Debian                                │
-│  • Assert version ∈ {11, 12}                         │
 │  • Check free disk space (>= 4 GB)                   │
 │  • Verify apt is not locked                          │
 │  • Print upgrade plan summary                        │
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────┐
-│              Pre-upgrade (Galaxy: update)            │
+│              Pre-upgrade (Galaxy: update)             │
 │  • Install prerequisites                             │
 │  • apt-get update                                    │
 │  • apt-get full-upgrade (current version)            │
@@ -388,7 +463,7 @@ make install
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────┐
-│                    dist-upgrade                      │
+│                    dist-upgrade                       │
 │  • apt-get upgrade  (safe, phase 1)                  │
 │  • apt-get dist-upgrade  (full, phase 2)             │
 │  • apt-get autoremove --purge                        │
@@ -403,7 +478,7 @@ make install
 ┌────────────────────────▼─────────────────────────────┐
 │              Post-upgrade Verification               │
 │  • Re-gather facts                                   │
-│  • Assert Debian 13 / trixie                         │
+│  • Assert target version / codename                  │
 │  • apt-get check                                     │
 │  • dpkg --audit                                      │
 │  • Print final status report                         │
@@ -416,21 +491,38 @@ make install
 
 ### Upgrade a single host
 
-```bash
+```
 ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
   --limit debian-server-01
 ```
 
+### Upgrade to a specific Debian version
+
+```
+# Upgrade to Debian 12
+make run VERSION=12
+
+# Upgrade to Debian 13 (default)
+make run
+
+# Upgrade to Debian 14
+make run VERSION=14
+
+# Or with ansible-playbook directly:
+ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
+  -e "debian_upgrade_target_version=12"
+```
+
 ### Upgrade without automatic reboot
 
-```bash
+```
 ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
   -e "debian_upgrade_allow_reboot=false"
 ```
 
 ### Use a local mirror
 
-```bash
+```
 ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
   -e "debian_upgrade_apt_mirror=mirror.yandex.ru/debian" \
   -e "debian_upgrade_apt_security_mirror=mirror.yandex.ru/debian-security"
@@ -438,7 +530,7 @@ ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
 
 ### Hold back the kernel during upgrade
 
-```yaml
+```
 # host_vars/debian-server-01.yml
 debian_upgrade_held_packages:
   - linux-image-amd64
@@ -447,15 +539,61 @@ debian_upgrade_held_packages:
 
 ### Run in CI (skip interactive pause, no reboot)
 
-```bash
+```
 CI=true ansible-playbook -i inventory/hosts.yml upgrade_debian.yml \
   -e "debian_upgrade_allow_reboot=false"
 ```
 
 ### Only verify (after a manual upgrade)
 
-```bash
+```
 ansible-playbook -i inventory/hosts.yml upgrade_debian.yml --tags verify
+```
+
+---
+
+## Testing
+
+[Molecule](https://molecule.readthedocs.io/) is used for integration testing of the `debian_upgrade` role.
+
+### Test scenarios
+
+| Scenario | Description |
+|---|---|
+| `default` | Debian 12→13 sources rewrite — verifies the full upgrade workflow |
+| `already_upgraded` | Host is already at the target version — verifies graceful skip |
+| `skip_release` | Debian 11→13 with `allow_skip_release=false` — verifies the upgrade is blocked |
+| `downgrade_protection` | Debian 13→12 — verifies the host is skipped (no downgrade) |
+
+### Prerequisites
+
+Install the test dependencies:
+
+```
+pip install molecule molecule-docker docker ansible-lint yamllint
+```
+
+Or use the bundled requirements file:
+
+```
+pip install -r roles/debian_upgrade/molecule/requirements.txt
+```
+
+### Running tests
+
+```
+# Run all Molecule scenarios
+make test
+
+# Run individual scenarios
+make test-default              # default (12→13 sources rewrite)
+make test-already-upgraded     # already_upgraded (skip on target)
+make test-skip-release         # skip_release (11→13 blocked)
+make test-downgrade            # downgrade_protection (13→12 skip)
+
+# Utility targets
+make test-converge             # Run converge only (no verify/destroy)
+make test-lint                 # Run linting inside the Molecule environment
 ```
 
 ---
@@ -470,7 +608,7 @@ TASK [Pre-flight | Verify apt is not locked] FAILED
 
 Another process is holding the dpkg lock. On the target host, run:
 
-```bash
+```
 ps aux | grep -E 'apt|dpkg|unattended'
 # Kill the offending process, then remove stale lock files if needed:
 rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock
@@ -485,7 +623,7 @@ TASK [Pre-flight | Check available disk space on /] FAILED
 
 Free up space before retrying:
 
-```bash
+```
 apt-get clean
 apt-get autoremove --purge
 journalctl --vacuum-size=500M
@@ -493,7 +631,7 @@ journalctl --vacuum-size=500M
 
 Or lower the threshold temporarily (not recommended for production):
 
-```bash
+```
 -e "debian_upgrade_min_free_disk_mb=2048"
 ```
 
@@ -505,7 +643,7 @@ TASK [Post-upgrade | Fail if dpkg audit reports broken packages] FAILED
 
 On the target host:
 
-```bash
+```
 dpkg --configure -a
 apt-get -f install
 apt-get dist-upgrade
@@ -515,7 +653,7 @@ apt-get dist-upgrade
 
 Increase the reboot timeout:
 
-```bash
+```
 -e "debian_upgrade_reboot_timeout=1200"
 ```
 
@@ -523,13 +661,13 @@ Increase the reboot timeout:
 
 Run the Galaxy install step:
 
-```bash
+```
 ansible-galaxy install -r requirements.yml
 ```
 
 If you use a private Automation Hub or a local roles path, add `--roles-path`:
 
-```bash
+```
 ansible-galaxy install -r requirements.yml --roles-path ./roles
 ```
 
@@ -542,7 +680,7 @@ ansible-galaxy install -r requirements.yml --roles-path ./roles
 - To use HTTPS mirrors, replace `http://` with `https://` in `debian_upgrade_apt_mirror` and update your `sources.list.j2` template accordingly. Note that not all Debian mirrors support HTTPS.
 - Backup files (`.bak`) are left on the remote host. Remove them after confirming the upgrade is stable:
 
-```bash
+```
 rm /etc/apt/sources.list.bak /etc/apt/sources.list.d/*.list.bak
 ```
 

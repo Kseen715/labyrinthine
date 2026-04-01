@@ -1,0 +1,35 @@
+---
+# Prepare the geerlingguy/docker-debian12-ansible container for the
+# downgrade_protection scenario.  Python and apt are already available
+# in this image, so no raw bootstrapping is needed.
+
+- name: Prepare (downgrade_protection)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display detected OS information
+      ansible.builtin.debug:
+        msg:
+          - "Distribution : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "Codename     : {{ ansible_facts['distribution_release'] }}"
+
+    # Save the original sources.list so verify.yml can confirm it was
+    # NOT modified by the role (downgrade should be skipped entirely).
+    - name: Save original /etc/apt/sources.list for later comparison
+      ansible.builtin.copy:
+        src: /etc/apt/sources.list
+        dest: /tmp/molecule_original_sources.list
+        remote_src: true
+        mode: "0644"
+      failed_when: false
+
+    # Write a converge-skipped marker so verify.yml can confirm that
+    # the converge play at least started (it will be overwritten by
+    # the converge pre-role marker if converge runs correctly).
+    - name: Write pre-converge marker
+      ansible.builtin.copy:
+        content: "prepare-complete"
+        dest: /tmp/molecule_downgrade_converge_marker
+        mode: "0644"

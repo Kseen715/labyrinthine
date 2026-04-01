@@ -1,0 +1,68 @@
+---
+# Verify: already_upgraded scenario
+# Confirms the role gracefully skipped (meta: end_host) when the host
+# was already running the target version, and that nothing was modified.
+
+- name: Verify — already_upgraded
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Verify the host is still Debian
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == "Debian"
+        fail_msg: >-
+          Expected distribution 'Debian', got '{{ ansible_facts['distribution'] }}'.
+        success_msg: "Distribution is Debian — OK."
+
+    - name: Verify the host is still at major version 12
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution_major_version'] == "12"
+        fail_msg: >-
+          Expected major version '12', got '{{ ansible_facts['distribution_major_version'] }}'.
+          The role should have skipped this host without making any changes.
+        success_msg: >-
+          Host is still Debian 12 ({{ ansible_facts['distribution_release'] }}) — role
+          correctly skipped the already-upgraded host.
+
+    - name: Check that no backup file was created (sources were never rewritten)
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.bak
+      register: sources_backup
+
+    - name: Assert no sources.list backup exists
+      ansible.builtin.assert:
+        that:
+          - not sources_backup.stat.exists
+        fail_msg: >-
+          /etc/apt/sources.list.bak exists — the role appears to have reached the
+          sources-rewrite stage, which should not happen for an already-upgraded host.
+        success_msg: "No sources.list.bak found — role did not attempt to rewrite APT sources."
+
+    - name: Verify no Ansible upgrade log was written
+      ansible.builtin.stat:
+        path: /etc/ansible-debian-upgrade.log
+      register: upgrade_log
+
+    - name: Assert upgrade log does not exist
+      ansible.builtin.assert:
+        that:
+          - not upgrade_log.stat.exists
+        fail_msg: >-
+          /etc/ansible-debian-upgrade.log exists — the role or playbook performed
+          steps beyond the expected end_host.
+        success_msg: "No upgrade log found — confirms the role ended early as expected."
+
+    - name: Print verification summary
+      ansible.builtin.debug:
+        msg:
+          - "======================================================"
+          - "  already_upgraded scenario — VERIFICATION PASSED"
+          - "======================================================"
+          - "  Host        : {{ inventory_hostname }}"
+          - "  OS          : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "  Codename    : {{ ansible_facts['distribution_release'] }}"
+          - "  Result      : Role correctly skipped (already at target)"
+          - "======================================================"

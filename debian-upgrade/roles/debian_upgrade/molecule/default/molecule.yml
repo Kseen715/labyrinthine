@@ -1,0 +1,52 @@
+---
+dependency:
+  name: shell
+  command: "true"
+
+driver:
+  name: docker
+
+platforms:
+  - name: debian12
+    image: geerlingguy/docker-debian12-ansible:latest
+    command: ""
+    privileged: true
+    pre_build_image: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    tmpfs:
+      - /run
+      - /tmp
+
+provisioner:
+  name: ansible
+  options:
+    tags: "preflight,sources"
+  config_options:
+    defaults:
+      callbacks_enabled: "default"
+      interpreter_python: auto_silent
+      deprecation_warnings: false
+  env:
+    ANSIBLE_ROLES_PATH: "../../..:~/.ansible/roles"
+    ANSIBLE_NOCOWS: "1"
+
+# Upgrade is a one-shot operation — idempotence does not apply.
+# The backup task and the template (which includes a timestamp) will
+# always report "changed" on a second run, which is by design.
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - verify
+    - cleanup
+    - destroy
+
+verifier:
+  name: ansible

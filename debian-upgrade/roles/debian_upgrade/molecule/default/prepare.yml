@@ -1,0 +1,64 @@
+---
+# Prepare the Debian 12 container for the default Molecule scenario.
+# This play is tagged 'always' so it runs even when the provisioner
+# passes --tags "preflight,sources" (which filters converge tasks).
+
+- name: Prepare
+  hosts: all
+  become: true
+  gather_facts: true
+  tags:
+    - always
+
+  tasks:
+    # ----------------------------------------------------------------
+    # Ensure a well-known /etc/apt/sources.list with bookworm entries
+    # so that the role's source-rewriting logic has something to work
+    # with (and we can verify it was replaced in verify.yml).
+    # ----------------------------------------------------------------
+    - name: Write a canonical Debian 12 (bookworm) sources.list
+      ansible.builtin.copy:
+        content: |
+          # Debian 12 (bookworm) — written by Molecule prepare
+          deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+          deb-src http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+          deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+          deb-src http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+          deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+          deb-src http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+        dest: /etc/apt/sources.list
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Ensure /etc/apt/sources.list.d directory exists
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # ----------------------------------------------------------------
+    # Update cache and install packages the role expects on the host.
+    # ----------------------------------------------------------------
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install psmisc (provides fuser, used in preflight apt-lock check)
+      ansible.builtin.apt:
+        name: psmisc
+        state: present
+
+    # ----------------------------------------------------------------
+    # Save a copy of the original sources.list so verify.yml can
+    # confirm it was actually changed by the role.
+    # ----------------------------------------------------------------
+    - name: Save original sources.list for later comparison
+      ansible.builtin.copy:
+        src: /etc/apt/sources.list
+        dest: /tmp/molecule_original_sources.list
+        remote_src: true
+        mode: "0644"

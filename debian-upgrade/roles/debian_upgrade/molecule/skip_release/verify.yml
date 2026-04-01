@@ -1,0 +1,124 @@
+---
+# Verify: skip_release scenario
+# Confirms that the skip-release upgrade attempt (12 → 14) was correctly
+# blocked and no system modifications were made.
+
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Verify host is still Debian 12 (bookworm)
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == "Debian"
+          - ansible_facts['distribution_major_version'] == "12"
+        fail_msg: >-
+          Expected host to still be Debian 12, but found
+          {{ ansible_facts['distribution'] }}
+          {{ ansible_facts['distribution_major_version'] }}
+          ({{ ansible_facts['distribution_release'] }}).
+        success_msg: >-
+          Host is correctly still running Debian 12
+          ({{ ansible_facts['distribution_release'] }}).
+
+    - name: Verify codename is still bookworm
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution_release'] == "bookworm"
+        fail_msg: >-
+          Expected codename 'bookworm' but got
+          '{{ ansible_facts['distribution_release'] }}'.
+        success_msg: "Codename is correctly 'bookworm'."
+
+    - name: Check that skip-release block marker exists
+      ansible.builtin.stat:
+        path: /tmp/molecule_skip_release_blocked
+      register: blocked_marker
+
+    - name: Assert skip-release enforcement marker was written
+      ansible.builtin.assert:
+        that:
+          - blocked_marker.stat.exists
+        fail_msg: >-
+          Marker file /tmp/molecule_skip_release_blocked not found.
+          The role may not have been blocked correctly by the
+          sequential upgrade path enforcement.
+        success_msg: >-
+          Skip-release enforcement marker found — role correctly
+          rejected the 12 → 14 upgrade attempt.
+
+    - name: Read /etc/apt/sources.list
+      ansible.builtin.command:
+        cmd: cat /etc/apt/sources.list
+      register: current_sources
+      changed_when: false
+      failed_when: false
+
+    - name: Assert sources.list does NOT reference forky
+      ansible.builtin.assert:
+        that:
+          - "'forky' not in current_sources.stdout"
+        fail_msg: >-
+          /etc/apt/sources.list unexpectedly contains 'forky'.
+          The role should have been blocked before rewriting APT sources.
+        success_msg: >-
+          /etc/apt/sources.list correctly does not reference 'forky'.
+      when: current_sources.rc == 0
+
+    - name: Assert sources.list still references bookworm
+      ansible.builtin.assert:
+        that:
+          - "'bookworm' in current_sources.stdout"
+        fail_msg: >-
+          /etc/apt/sources.list does not contain 'bookworm'.
+          Sources may have been incorrectly modified.
+        success_msg: >-
+          /etc/apt/sources.list still correctly references 'bookworm'.
+      when: current_sources.rc == 0
+
+    - name: Check that no sources.list backup was created
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.bak
+      register: sources_backup
+
+    - name: Assert no backup was created (role never reached sources stage)
+      ansible.builtin.assert:
+        that:
+          - not sources_backup.stat.exists
+        fail_msg: >-
+          /etc/apt/sources.list.bak exists — the role should not have
+          reached the APT sources rewrite stage.
+        success_msg: >-
+          No sources.list backup found, confirming the role was
+          blocked before the APT sources stage.
+
+    - name: Check for any forky references in sources.list.d
+      ansible.builtin.command:
+        cmd: grep -rl forky /etc/apt/sources.list.d/
+      register: forky_in_sources_d
+      changed_when: false
+      failed_when: false
+
+    - name: Assert no forky references in sources.list.d
+      ansible.builtin.assert:
+        that:
+          - forky_in_sources_d.rc != 0 or forky_in_sources_d.stdout | length == 0
+        fail_msg: >-
+          Found forky references in /etc/apt/sources.list.d/:
+          {{ forky_in_sources_d.stdout_lines | default([]) }}
+        success_msg: >-
+          No forky references found in /etc/apt/sources.list.d/.
+
+    - name: Print verification summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "  skip_release Scenario — PASSED"
+          - "=============================================="
+          - "  OS           : {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "  Codename     : {{ ansible_facts['distribution_release'] }}"
+          - "  Blocked      : yes (marker file present)"
+          - "  Sources      : unchanged (no forky references)"
+          - "=============================================="

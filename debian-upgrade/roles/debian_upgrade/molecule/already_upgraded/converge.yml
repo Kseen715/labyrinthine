@@ -1,0 +1,35 @@
+---
+# Converge playbook for the already_upgraded scenario.
+#
+# The host is running Debian 12 (bookworm) and the target version is also 12.
+# The role should detect this and gracefully end the play via meta: end_host
+# (because debian_upgrade_fail_if_already_upgraded defaults to false).
+#
+# Uses the debian_upgrade role directly (with Galaxy deps) so the full
+# role entry point is exercised, same as a real playbook run.
+
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Target the same version the host is already running
+    debian_upgrade_target_version: "12"
+
+    # Safety: disable operations that cannot work in containers
+    debian_upgrade_allow_reboot: false
+    debian_upgrade_check_disk_space: false
+
+    # Disable heavy stages (they should never be reached anyway,
+    # because end_host fires during preflight, but belt-and-suspenders)
+    debian_upgrade_pre_update: false
+    debian_upgrade_dist_upgrade: false
+    debian_upgrade_autoremove: false
+    debian_upgrade_verify_after_upgrade: false
+
+    # Do not fail — we expect a clean skip
+    debian_upgrade_fail_if_already_upgraded: false
+
+  roles:
+    - role: debian_upgrade
