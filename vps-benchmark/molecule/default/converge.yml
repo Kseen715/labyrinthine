@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# molecule/default/converge.yml
+# Applies the vps_benchmark role inside the test containers.
+# Network benchmark is disabled — it would download/run a remote script.
+# =============================================================================
+
+- name: Converge
+  hosts: all
+  become: true
+  environment:
+    TERM: dumb
+    DEBIAN_FRONTEND: noninteractive
+  vars:
+    vps_benchmark_run_netbench: false
+    vps_benchmark_output_dir: /tmp
+  roles:
+    - role: vps_benchmark

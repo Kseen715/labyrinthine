@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# tasks/main.yml — VPS benchmark role
+#
+# All benchmark commands pipe their output through `tee` so results are:
+#   1. Written to a file in vps_benchmark_output_dir (persists after the run)
+#   2. Captured by the `register` variable (shown via `debug` at the end)
+#
+# Process-substitution (`> >(tee ...)`) is intentionally avoided: plain pipes
+# (`| tee`) are more reliable over SSH and let Ansible capture stdout cleanly.
+#
+# TERM=dumb is set at the play level in benchmark.yml so no benchmark script
+# can open an alternate terminal screen buffer during the run.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Package installation
+# ---------------------------------------------------------------------------
+- name: Install benchmark tools (sysbench, hdparm)
+  ansible.builtin.apt:
+    name:
+      - sysbench
+      - hdparm
+    state: present
+    update_cache: true
+
+- name: Install utility packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - jq
+      - bc
+      - dnsutils
+      - ncdu
+      - htop
+      - net-tools
+    state: present
+
+# btop is in Debian 12+ / Ubuntu 22.04+ repos; older releases may not have it
+- name: Install btop (optional — skipped if unavailable in repos)
+  ansible.builtin.apt:
+    name: btop
+    state: present
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# Benchmarks
+# ---------------------------------------------------------------------------
+
+- name: Run network benchmark
+  ansible.builtin.shell: |
+    # Capture raw output (preserves ANSI/spinner for the file).
+    RAW=$(timeout 10 sh -c 'wget -qO- bench.tlab.pw' | bash \
+          || echo "bench.tlab.pw: timeout or unreachable")
+    # Write raw bytes to the result file unchanged.
+    printf '%s\n' "$RAW" > {{ vps_benchmark_output_dir }}/netbench.txt
+    # Emit a clean version to stdout for Ansible debug output:
+    #   1. Strip ANSI CSI escape sequences (\e[...X)
+    #   2. Strip any remaining bare \e[ fragments
+    #   3. Strip carriage returns
+    #   4. Delete raw backspace characters (ASCII 0x08, used by the spinner)
+    #   5. Drop lines that consist only of braille spinner chars (U+2800-U+28FF)
+    printf '%s\n' "$RAW" \
+      | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
+            -e 's/\x1b\[[0-9;?]*//g' \
+            -e 's/\r//g' \
+      | tr -d '\010' \
+      | grep -Pv '^\s*[\x{2800}-\x{28FF}]*\s*$' \
+      || true
+  args:
+    executable: /bin/bash
+  register: netbench_result
+  changed_when: false
+  when: vps_benchmark_run_netbench
+
+- name: Run sysbench CPU benchmark
+  ansible.builtin.shell: |
+    {
+      echo "=== sysbench: 1 thread ==="
+      sysbench cpu run --threads=1 | grep "events per second:"
+      echo -e "\n=== sysbench: $(nproc) threads (max) ==="
+      sysbench cpu run --threads=$(nproc) | grep "events per second:"
+    } | tee {{ vps_benchmark_output_dir }}/cpubench.txt
+  args:
+    executable: /bin/bash
+  register: cpubench_result
+  changed_when: false
+
+- name: Run disk speed benchmark
+  ansible.builtin.shell: |
+    {
+      DEV=$(findmnt -n -o SOURCE / | sed 's/[0-9]*$//' | head -n1)
+      if [ -b "$DEV" ]; then
+        echo "Testing device: $DEV"
+        hdparm -Tt "$DEV" | grep "disk reads:"
+      else
+        echo "Could not determine system disk (overlay/virtual device: $DEV)"
+      fi
+    } | tee {{ vps_benchmark_output_dir }}/drivebench.txt
+  args:
+    executable: /bin/bash
+  register: drivebench_result
+  changed_when: false
+
+- name: Run RAM speed benchmark
+  ansible.builtin.shell: |
+    {
+      sysbench memory --memory-block-size=1M run | grep -i transferred
+    } | tee {{ vps_benchmark_output_dir }}/membench.txt
+  args:
+    executable: /bin/bash
+  register: membench_result
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# Display results
+# ---------------------------------------------------------------------------
+
+- name: "Results | Network benchmark"
+  ansible.builtin.debug:
+    msg: "{{ netbench_result.stdout_lines }}"
+  when: vps_benchmark_run_netbench
+
+- name: "Results | CPU benchmark"
+  ansible.builtin.debug:
+    msg: "{{ cpubench_result.stdout_lines }}"
+
+- name: "Results | Disk benchmark"
+  ansible.builtin.debug:
+    msg: "{{ drivebench_result.stdout_lines }}"
+
+- name: "Results | RAM benchmark"
+  ansible.builtin.debug:
+    msg: "{{ membench_result.stdout_lines }}"
