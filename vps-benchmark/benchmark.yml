@@ -1,0 +1,20 @@
+---
+# VPS Benchmark playbook — runs all benchmark tasks on target hosts.
+# By default runs against the localhost. Override with -i or -l.
+#
+# Usage:
+#   ansible-playbook benchmark.yml                          # local
+#   ansible-playbook benchmark.yml -i inventory/hosts.yml  # custom inventory
+#   ansible-playbook benchmark.yml -e vps_benchmark_run_netbench=false
+#
+# TERM=dumb is set play-wide so benchmark scripts that use alternate terminal
+# screen buffers (tput smcup / rmcup) are safe to run over SSH.
+
+- name: VPS Benchmark
+  hosts: all
+  become: true
+  environment:
+    TERM: dumb
+    DEBIAN_FRONTEND: noninteractive
+  roles:
+    - vps_benchmark

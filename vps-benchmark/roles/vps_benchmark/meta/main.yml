@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: vps_benchmark
+  description: "Benchmark CPU, RAM, disk and network on Debian-based VPS systems"
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+        - noble
+dependencies: []

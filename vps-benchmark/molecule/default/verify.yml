@@ -1,0 +1,113 @@
+---
+# =============================================================================
+# molecule/default/verify.yml
+# Asserts the role ran successfully inside the test containers.
+# =============================================================================
+
+- name: Verify
+  hosts: all
+  become: true
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # Package presence
+    # -------------------------------------------------------------------------
+    - name: Verify sysbench is installed
+      ansible.builtin.command: sysbench --version
+      register: sysbench_ver
+      changed_when: false
+      failed_when: sysbench_ver.rc != 0
+
+    - name: Verify hdparm is installed
+      ansible.builtin.command: which hdparm
+      changed_when: false
+
+    - name: Verify utility packages are installed
+      ansible.builtin.command: "which {{ item }}"
+      loop:
+        - curl
+        - wget
+        - jq
+        - bc
+        - htop
+        - ncdu
+      changed_when: false
+
+    - name: Verify dnsutils provides dig
+      ansible.builtin.command: which dig
+      changed_when: false
+
+    - name: Verify net-tools provides ifconfig
+      ansible.builtin.command: which ifconfig
+      changed_when: false
+
+    # -------------------------------------------------------------------------
+    # CPU benchmark
+    # -------------------------------------------------------------------------
+    - name: Stat CPU benchmark result file
+      ansible.builtin.stat:
+        path: /tmp/cpubench.txt
+      register: cpubench_stat
+
+    - name: Assert CPU benchmark file was created
+      ansible.builtin.assert:
+        that: cpubench_stat.stat.exists
+        fail_msg: "/tmp/cpubench.txt was not created by the CPU benchmark task"
+
+    - name: Assert CPU benchmark file contains results
+      ansible.builtin.command: grep -q "events per second" /tmp/cpubench.txt
+      changed_when: false
+
+    # -------------------------------------------------------------------------
+    # RAM benchmark
+    # -------------------------------------------------------------------------
+    - name: Stat RAM benchmark result file
+      ansible.builtin.stat:
+        path: /tmp/membench.txt
+      register: membench_stat
+
+    - name: Assert RAM benchmark file was created
+      ansible.builtin.assert:
+        that: membench_stat.stat.exists
+        fail_msg: "/tmp/membench.txt was not created by the RAM benchmark task"
+
+    - name: Assert RAM benchmark file contains results
+      ansible.builtin.command: grep -qi "transferred" /tmp/membench.txt
+      changed_when: false
+
+    # -------------------------------------------------------------------------
+    # Disk benchmark
+    # In Docker / overlay filesystems hdparm cannot detect a block device;
+    # the role correctly outputs a fallback message — verify the file exists.
+    # -------------------------------------------------------------------------
+    - name: Stat disk benchmark result file
+      ansible.builtin.stat:
+        path: /tmp/drivebench.txt
+      register: drivebench_stat
+
+    - name: Assert disk benchmark file was created
+      ansible.builtin.assert:
+        that: drivebench_stat.stat.exists
+        fail_msg: "/tmp/drivebench.txt was not created by the disk benchmark task"
+
+    - name: Show disk benchmark output (informational — overlay FS expected in Docker)
+      ansible.builtin.command: cat /tmp/drivebench.txt
+      register: drivebench_content
+      changed_when: false
+
+    - name: Print disk benchmark content
+      ansible.builtin.debug:
+        var: drivebench_content.stdout_lines
+
+    # -------------------------------------------------------------------------
+    # Network benchmark — must NOT have run (disabled in converge.yml)
+    # -------------------------------------------------------------------------
+    - name: Assert netbench.txt was NOT created (net bench disabled)
+      ansible.builtin.stat:
+        path: /tmp/netbench.txt
+      register: netbench_stat
+
+    - name: Assert netbench result file is absent
+      ansible.builtin.assert:
+        that: not netbench_stat.stat.exists
+        fail_msg: "/tmp/netbench.txt exists but vps_benchmark_run_netbench was false"

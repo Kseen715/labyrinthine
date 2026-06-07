@@ -1,0 +1,5 @@
+---
+# Galaxy requirements for vps-benchmark
+# No external roles/collections needed — all tasks use ansible.builtin modules.
+collections: []
+roles: []

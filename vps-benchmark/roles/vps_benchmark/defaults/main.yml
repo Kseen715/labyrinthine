@@ -1,0 +1,8 @@
+---
+# Directory where benchmark result files are written
+vps_benchmark_output_dir: /tmp
+
+# Set to false to skip the network benchmark.
+# The net bench downloads and executes a remote script (bench.tlab.pw);
+# disable it in air-gapped environments or CI pipelines.
+vps_benchmark_run_netbench: true

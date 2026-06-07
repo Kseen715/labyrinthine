@@ -1,0 +1,48 @@
+---
+# =============================================================================
+# molecule/default/molecule.yml
+# Tests the vps_benchmark role against Debian 12 and Ubuntu 22.04 containers.
+#
+# Network benchmark is disabled in CI (vps_benchmark_run_netbench: false set in
+# converge.yml) to avoid downloading and executing remote scripts in Docker.
+# =============================================================================
+
+dependency:
+  name: galaxy
+
+driver:
+  name: docker
+
+platforms:
+  - name: debian12
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /usr/sbin/init
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+
+  - name: ubuntu2204
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /usr/sbin/init
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+
+provisioner:
+  name: ansible
+  env:
+    TERM: dumb
+    DEBIAN_FRONTEND: noninteractive
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
+  config_options:
+    defaults:
+      stdout_callback: ansible.builtin.default
+      result_format: yaml
+      remote_tmp: /tmp/.ansible
+
+verifier:
+  name: ansible
