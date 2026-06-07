@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# inventory/group_vars/nodes.yml
+# Variables that apply to every proxy node.
+# =============================================================================
+
+# ── RemnaNode ─────────────────────────────────────────────────────────────────
+# Port RemnaNode listens on. The panel must use the same port when adding nodes.
+app_port: 2222
+
+# ── Monitoring connectivity ───────────────────────────────────────────────────
+# Hostname of the monitoring host in the Ansible inventory.
+# Automatically picked from the [monitoring] group; keep it empty to disable
+# Consul-port delegation and if no monitoring server is defined.
+monitoring_hostname: "{{ groups['monitoring'] | default([]) | first | default('') }}"
+
+# IP of the monitoring server.  Resolved at runtime from the gathered facts
+# of the monitoring host so UFW always gets a real IP (not a hostname).
+# UFW on each node will allow ports 9100 and 8301 from this IP.
+# Consul Agent on each node will join this address.
+monitoring_server_ip: >-
+  {{ hostvars[monitoring_hostname]['ansible_default_ipv4']['address']
+     if monitoring_hostname | length > 0
+        and monitoring_hostname in hostvars
+        and 'ansible_default_ipv4' in hostvars[monitoring_hostname]
+     else '' }}
+
+# ── Caddy (self-hosted subscription page / SNI camouflage) ───────────────────
+# Set to false to skip Caddy entirely.
+caddy_enabled: true
+
+# ── Node Exporter port ────────────────────────────────────────────────────────
+node_exporter_port: 9100

@@ -1,0 +1,50 @@
+---
+# Called only when monitoring_caddy_enabled is true.
+
+- name: Create monitoring Caddy directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/monitoring-caddy
+    - /var/lib/remnawave/caddy/certificates
+    - /var/lib/remnawave/caddy/config
+
+- name: Deploy monitoring Caddyfile
+  ansible.builtin.template:
+    src: monitoring-caddyfile.j2
+    dest: /opt/monitoring-caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart monitoring caddy
+
+- name: Deploy monitoring Caddy docker-compose.yml
+  ansible.builtin.template:
+    src: monitoring-caddy-compose.yml.j2
+    dest: /opt/monitoring-caddy/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart monitoring caddy
+
+# Clone SNI templates only when this monitoring server also acts as a RemnaNode
+# proxy endpoint. The templates give clients their connection configuration.
+- name: Clone SNI templates for remna node domain
+  ansible.builtin.git:
+    repo: https://github.com/AndreyTimoschuk/sni-templates.git
+    dest: /opt/monitoring-caddy/templates
+    version: HEAD
+    force: true
+    update: true
+  failed_when: false
+  when: remna_node_domain | default('') | length > 0
+
+- name: Start monitoring Caddy
+  community.docker.docker_compose_v2:
+    project_src: /opt/monitoring-caddy
+    state: present
+  when: docker_services_enabled | bool

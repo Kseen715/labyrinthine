@@ -1,0 +1,73 @@
+---
+- name: Gather hardware facts for swap calculation
+  ansible.builtin.setup:
+    gather_subset: [hardware]
+
+- name: Calculate swap size for RAM < 4 GB  (1.5x RAM)
+  ansible.builtin.set_fact:
+    swap_size_mb: "{{ ((ansible_memtotal_mb | int) * 1.5) | int }}"
+  when: ansible_memtotal_mb | int < 4096
+
+- name: Calculate swap size for RAM >= 4 GB (0.5x RAM)
+  ansible.builtin.set_fact:
+    swap_size_mb: "{{ ((ansible_memtotal_mb | int) * 0.5) | int }}"
+  when: ansible_memtotal_mb | int >= 4096
+
+- name: Cap swap at 8 GB
+  ansible.builtin.set_fact:
+    swap_size_mb: "8192"
+  when: swap_size_mb | int > 8192
+
+- name: Check whether swap file already exists
+  ansible.builtin.stat:
+    path: /swapfile
+  register: _swap_stat
+
+# ── Disk-space cap (only evaluated when swap does not yet exist) ─────────────
+- name: Get free space on root filesystem (bytes → MB)
+  ansible.builtin.set_fact:
+    _root_free_mb: >-
+      {{ (ansible_mounts
+          | selectattr('mount', 'equalto', '/')
+          | list | first).size_available | int // 1048576 }}
+  when: not _swap_stat.stat.exists
+
+- name: Cap swap at available disk space (leave 1 GB free)
+  ansible.builtin.set_fact:
+    swap_size_mb: "{{ [[swap_size_mb | int, (_root_free_mb | int) - 1024] | min, 0] | max }}"
+  when: not _swap_stat.stat.exists
+
+- name: Create swap file
+  ansible.builtin.command: "fallocate -l {{ swap_size_mb }}M /swapfile"
+  when: not _swap_stat.stat.exists and swap_size_mb | int > 0
+
+- name: Secure swap file permissions
+  ansible.builtin.file:
+    path: /swapfile
+    mode: "0600"
+    owner: root
+    group: root
+  when: not _swap_stat.stat.exists and swap_size_mb | int > 0
+
+- name: Format swap file
+  ansible.builtin.command: mkswap /swapfile
+  when: not _swap_stat.stat.exists and swap_size_mb | int > 0
+
+- name: Activate swap file
+  ansible.builtin.command: swapon /swapfile
+  when: not _swap_stat.stat.exists and swap_size_mb | int > 0
+
+- name: Persist swap in /etc/fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^/swapfile'
+    line: '/swapfile none swap sw 0 0'
+    state: present
+
+- name: Set swappiness
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: '10'
+    state: present
+    sysctl_set: true
+    reload: true

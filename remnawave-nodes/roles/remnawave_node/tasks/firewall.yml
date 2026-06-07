@@ -1,0 +1,30 @@
+---
+# UFW rules on the NODE itself
+- name: Allow HTTPS (Caddy) through UFW
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+
+- name: Allow RemnaNode port from monitoring server only
+  community.general.ufw:
+    rule: allow
+    port: "{{ app_port | string }}"
+    proto: tcp
+    src: "{{ monitoring_server_ip }}"
+
+- name: Allow Node Exporter from monitoring server only
+  community.general.ufw:
+    rule: allow
+    port: "{{ node_exporter_port | string }}"
+    proto: tcp
+    src: "{{ monitoring_server_ip }}"
+
+# ── Open Consul ports on the MONITORING SERVER for this node ─────────────────
+# Delegated so that adding a new node automatically opens its ports on
+# the monitoring server without manual intervention.
+# include_tasks guarantees the when condition is fully evaluated before any
+# delegate_to resolution occurs.
+- name: Open Consul firewall ports on monitoring server
+  ansible.builtin.include_tasks: firewall-consul-delegation.yml
+  when: monitoring_hostname | default('') | length > 0

@@ -1,0 +1,178 @@
+---
+# =============================================================================
+# molecule/node/verify.yml
+# =============================================================================
+
+- name: Verify – proxy node
+  hosts: nodes
+  become: true
+
+  tasks:
+
+    # ── Common role ──────────────────────────────────────────────────────────
+    - name: Verify system user exists
+      ansible.builtin.command: "id testadmin"
+      changed_when: false
+
+    - name: Verify sudoers file created
+      ansible.builtin.stat:
+        path: /etc/sudoers.d/testadmin
+      register: _sudoers
+    - name: Assert sudoers file
+      ansible.builtin.assert:
+        that: _sudoers.stat.exists
+        fail_msg: "/etc/sudoers.d/testadmin missing"
+
+    - name: Verify UFW installed
+      ansible.builtin.command: which ufw
+      changed_when: false
+
+    - name: Verify logrotate config deployed
+      ansible.builtin.stat:
+        path: /etc/logrotate.d/remnawave
+      register: _logrotate
+    - name: Assert logrotate config
+      ansible.builtin.assert:
+        that: _logrotate.stat.exists
+        fail_msg: "/etc/logrotate.d/remnawave missing"
+
+    # ── remnawave_node role ──────────────────────────────────────────────────
+    - name: Verify RemnaNode directory created
+      ansible.builtin.stat:
+        path: /opt/remnanode
+      register: _rn_dir
+    - name: Assert RemnaNode directory
+      ansible.builtin.assert:
+        that: _rn_dir.stat.isdir
+        fail_msg: "/opt/remnanode directory not created"
+
+    - name: Verify RemnaNode .env rendered with correct mode
+      ansible.builtin.stat:
+        path: /opt/remnanode/.env
+      register: _rn_env
+    - name: Assert .env exists and is restricted
+      ansible.builtin.assert:
+        that:
+          - _rn_env.stat.exists
+          - _rn_env.stat.mode == '0600'
+        fail_msg: "/opt/remnanode/.env missing or wrong permissions"
+
+    - name: Verify .env contains SECRET_KEY
+      ansible.builtin.command: grep -q "SECRET_KEY=molecule_test_secret_key" /opt/remnanode/.env
+      changed_when: false
+
+    - name: Verify .env contains NODE_PORT
+      ansible.builtin.command: grep -q "NODE_PORT=2222" /opt/remnanode/.env
+      changed_when: false
+
+    - name: Verify RemnaNode docker-compose.yml rendered
+      ansible.builtin.stat:
+        path: /opt/remnanode/docker-compose.yml
+      register: _rn_compose
+    - name: Assert RemnaNode compose exists
+      ansible.builtin.assert:
+        that: _rn_compose.stat.exists
+        fail_msg: "/opt/remnanode/docker-compose.yml not rendered"
+
+    - name: Verify RemnaNode compose image
+      ansible.builtin.command: grep -q "remnawave/node" /opt/remnanode/docker-compose.yml
+      changed_when: false
+
+    - name: Verify GEO update script deployed
+      ansible.builtin.stat:
+        path: /opt/remnanode/update-geo-files.sh
+      register: _geo_script
+    - name: Assert GEO script exists and executable
+      ansible.builtin.assert:
+        that:
+          - _geo_script.stat.exists
+          - _geo_script.stat.mode == '0755'
+        fail_msg: "update-geo-files.sh missing or not executable"
+
+    # ── Caddy ────────────────────────────────────────────────────────────────
+    - name: Verify Caddy directory created
+      ansible.builtin.stat:
+        path: /opt/caddy
+      register: _caddy_dir
+    - name: Assert Caddy directory
+      ansible.builtin.assert:
+        that: _caddy_dir.stat.isdir
+        fail_msg: "/opt/caddy directory not created"
+
+    - name: Verify Caddy Caddyfile rendered
+      ansible.builtin.stat:
+        path: /opt/caddy/Caddyfile
+      register: _caddyfile
+    - name: Assert Caddyfile exists
+      ansible.builtin.assert:
+        that: _caddyfile.stat.exists
+        fail_msg: "/opt/caddy/Caddyfile not rendered"
+
+    - name: Verify Caddy docker-compose.yml rendered
+      ansible.builtin.stat:
+        path: /opt/caddy/docker-compose.yml
+      register: _caddy_compose
+    - name: Assert Caddy compose exists
+      ansible.builtin.assert:
+        that: _caddy_compose.stat.exists
+        fail_msg: "/opt/caddy/docker-compose.yml not rendered"
+
+    # ── Consul Agent ─────────────────────────────────────────────────────────
+    - name: Verify Consul Agent directory created
+      ansible.builtin.stat:
+        path: /opt/consul
+      register: _consul_dir
+    - name: Assert Consul Agent directory
+      ansible.builtin.assert:
+        that: _consul_dir.stat.isdir
+        fail_msg: "/opt/consul directory not created"
+
+    - name: Verify Consul services directory created
+      ansible.builtin.stat:
+        path: /opt/consul/services
+      register: _consul_svc_dir
+    - name: Assert Consul services directory
+      ansible.builtin.assert:
+        that: _consul_svc_dir.stat.isdir
+        fail_msg: "/opt/consul/services directory not created"
+
+    - name: Verify node-exporter service definition rendered
+      ansible.builtin.stat:
+        path: /opt/consul/services/node-exporter.json
+      register: _consul_nex
+    - name: Assert node-exporter service definition exists
+      ansible.builtin.assert:
+        that: _consul_nex.stat.exists
+        fail_msg: "/opt/consul/services/node-exporter.json not rendered"
+
+    - name: Verify node-exporter service definition JSON is valid
+      ansible.builtin.command: python3 -m json.tool /opt/consul/services/node-exporter.json
+      changed_when: false
+
+    - name: Verify Consul Agent docker-compose.yml rendered
+      ansible.builtin.stat:
+        path: /opt/consul/docker-compose.yml
+      register: _consul_compose
+    - name: Assert Consul Agent compose exists
+      ansible.builtin.assert:
+        that: _consul_compose.stat.exists
+        fail_msg: "/opt/consul/docker-compose.yml not rendered"
+
+    # ── Node Exporter ────────────────────────────────────────────────────────
+    - name: Verify Node Exporter directory created
+      ansible.builtin.stat:
+        path: /opt/node_exporter
+      register: _nex_dir
+    - name: Assert Node Exporter directory
+      ansible.builtin.assert:
+        that: _nex_dir.stat.isdir
+        fail_msg: "/opt/node_exporter directory not created"
+
+    - name: Verify Node Exporter docker-compose.yml rendered
+      ansible.builtin.stat:
+        path: /opt/node_exporter/docker-compose.yml
+      register: _nex_compose
+    - name: Assert Node Exporter compose exists
+      ansible.builtin.assert:
+        that: _nex_compose.stat.exists
+        fail_msg: "/opt/node_exporter/docker-compose.yml not rendered"

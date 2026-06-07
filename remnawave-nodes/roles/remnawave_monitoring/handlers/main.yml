@@ -1,0 +1,14 @@
+---
+- name: restart monitoring stack
+  community.docker.docker_compose_v2:
+    project_src: /opt/monitoring
+    state: present
+    recreate: always
+  when: docker_services_enabled | bool
+
+- name: restart monitoring caddy
+  community.docker.docker_compose_v2:
+    project_src: /opt/monitoring-caddy
+    state: present
+    recreate: always
+  when: docker_services_enabled | bool

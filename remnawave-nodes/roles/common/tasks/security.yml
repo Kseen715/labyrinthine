@@ -1,0 +1,149 @@
+---
+# ── UFW ───────────────────────────────────────────────────────────────────────
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+
+- name: Rate-limit SSH to mitigate brute-force
+  community.general.ufw:
+    rule: limit
+    port: ssh
+    proto: tcp
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+
+# ── SSH hardening ─────────────────────────────────────────────────────────────
+- name: Install OpenSSH server
+  ansible.builtin.apt:
+    name: openssh-server
+    state: present
+
+- name: Force SSH to IPv4 only
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?AddressFamily'
+    line: 'AddressFamily inet'
+    state: present
+  notify: restart ssh
+
+- name: Enable pubkey authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PubkeyAuthentication'
+    line: 'PubkeyAuthentication yes'
+    state: present
+  notify: restart ssh
+
+# Enable key auth, then verify connection before disabling passwords
+- name: Restart SSH to apply pubkey setting
+  ansible.builtin.systemd:
+    name: ssh
+    state: restarted
+  when: docker_services_enabled | bool
+
+- name: Wait for SSH to be reachable with key
+  ansible.builtin.wait_for_connection:
+    timeout: 30
+  when: docker_services_enabled | bool
+
+- name: Harden SSH daemon settings
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?{{ item.key }}'
+    line: "{{ item.key }} {{ item.value }}"
+    state: present
+  loop:
+    - { key: 'PasswordAuthentication',    value: 'no' }
+    - { key: 'PermitRootLogin',           value: 'without-password' }
+    - { key: 'PermitEmptyPasswords',      value: 'no' }
+    - { key: 'MaxAuthTries',              value: '6' }
+    - { key: 'MaxSessions',               value: '20' }
+    - { key: 'LoginGraceTime',            value: '60' }
+    - { key: 'ClientAliveInterval',       value: '300' }
+    - { key: 'ClientAliveCountMax',       value: '2' }
+    - { key: 'X11Forwarding',             value: 'no' }
+    - { key: 'UseDNS',                    value: 'no' }
+    - { key: 'GSSAPIAuthentication',      value: 'no' }
+    - { key: 'Protocol',                  value: '2' }
+    - { key: 'StrictModes',               value: 'yes' }
+    - { key: 'IgnoreRhosts',              value: 'yes' }
+    - { key: 'HostbasedAuthentication',   value: 'no' }
+    - { key: 'AuthorizedKeysFile',        value: '.ssh/authorized_keys' }
+  notify: restart ssh
+
+# ── Fail2Ban ──────────────────────────────────────────────────────────────────
+- name: Install Fail2Ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  when: enable_fail2ban | bool
+
+- name: Configure Fail2Ban
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.local
+    mode: "0644"
+    content: |
+      [DEFAULT]
+      bantime   = 86400
+      findtime  = 600
+      maxretry  = 5
+      backend   = systemd
+      banaction = ufw
+
+      [sshd]
+      enabled  = true
+      port     = ssh
+      filter   = sshd
+      logpath  = %(sshd_log)s
+      backend  = systemd
+      maxretry = 3
+      bantime  = 86400
+      ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+  when: enable_fail2ban | bool
+  notify: restart fail2ban
+
+- name: Enable and start Fail2Ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: enable_fail2ban | bool
+
+# ── Unattended upgrades ───────────────────────────────────────────────────────
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+    update_cache: true
+  when: enable_unattended_upgrades | bool
+
+- name: Configure unattended-upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}-security";
+      };
+      Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+      Unattended-Upgrade::MinimalSteps "true";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "false";
+  when: enable_unattended_upgrades | bool
+
+- name: Enable automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+      APT::Periodic::Unattended-Upgrade "1";
+  when: enable_unattended_upgrades | bool

@@ -1,0 +1,86 @@
+---
+- name: Create RemnaNode directory
+  ansible.builtin.file:
+    path: /opt/remnanode
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create Caddy certificates directory (shared with RemnaNode)
+  ansible.builtin.file:
+    path: /var/lib/remnawave/caddy/certificates
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# ── GEO files ─────────────────────────────────────────────────────────────────
+- name: Download geosite_ru.dat
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat
+    dest: /opt/remnanode/geosite_ru.dat
+    mode: "0644"
+  register: _geo_site
+  failed_when: false
+
+- name: Download geoip_ru.dat
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat
+    dest: /opt/remnanode/geoip_ru.dat
+    mode: "0644"
+  register: _geo_ip
+  failed_when: false
+
+- name: Download zapret.dat
+  ansible.builtin.get_url:
+    url: https://github.com/kutovoys/ru_gov_zapret/releases/latest/download/zapret.dat
+    dest: /opt/remnanode/zapret.dat
+    mode: "0644"
+  register: _geo_zapret
+  failed_when: false
+
+# ── Config files ──────────────────────────────────────────────────────────────
+- name: Deploy RemnaNode .env
+  ansible.builtin.template:
+    src: remnanode.env.j2
+    dest: /opt/remnanode/.env
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart remnanode
+
+- name: Deploy RemnaNode docker-compose.yml
+  ansible.builtin.template:
+    src: remnanode-compose.yml.j2
+    dest: /opt/remnanode/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart remnanode
+
+# ── GEO auto-update cron ──────────────────────────────────────────────────────
+- name: Deploy GEO update script
+  ansible.builtin.template:
+    src: update-geo-files.sh.j2
+    dest: /opt/remnanode/update-geo-files.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Schedule weekly GEO file update (Sunday 03:00 Moscow)
+  ansible.builtin.cron:
+    name: "remnawave – update GEO files"
+    minute: "0"
+    hour: "3"
+    weekday: "0"
+    job: "TZ=Europe/Moscow /opt/remnanode/update-geo-files.sh"
+    user: root
+    state: present
+
+# ── Start service ─────────────────────────────────────────────────────────────
+- name: Start RemnaNode
+  community.docker.docker_compose_v2:
+    project_src: /opt/remnanode
+    state: present
+  when: docker_services_enabled | bool

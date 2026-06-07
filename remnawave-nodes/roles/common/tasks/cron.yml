@@ -1,0 +1,30 @@
+---
+- name: Install cron
+  ansible.builtin.apt:
+    name: cron
+    state: present
+
+- name: Enable and start cron
+  ansible.builtin.systemd:
+    name: cron
+    state: started
+    enabled: true
+
+- name: Deploy UFW blacklist script
+  ansible.builtin.template:
+    src: ufw-blacklist.sh.j2
+    dest: /usr/local/bin/ufw-blacklist.sh
+    owner: root
+    group: root
+    mode: "0755"
+  when: enable_ufw_blacklist | bool
+
+- name: Schedule UFW blacklist update (daily 03:00 host time)
+  ansible.builtin.cron:
+    name: "UFW blacklist – block scanner networks"
+    minute: "0"
+    hour: "3"
+    job: "/usr/local/bin/ufw-blacklist.sh"
+    user: root
+    state: present
+  when: enable_ufw_blacklist | bool

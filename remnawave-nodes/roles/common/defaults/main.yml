@@ -1,0 +1,15 @@
+---
+# ── System user ──────────────────────────────────────────────────────────────
+system_user: "admin"
+system_user_password: ""  # leave empty to use SSH key auth only; set to lock-in a password
+ssh_public_key: ""
+
+# ── Features ─────────────────────────────────────────────────────────────────
+enable_sysctl_optimization: true
+enable_swap: true
+enable_bbr: true
+enable_fail2ban: true
+enable_unattended_upgrades: true
+enable_ufw_blacklist: true
+docker_install: true
+docker_services_enabled: true

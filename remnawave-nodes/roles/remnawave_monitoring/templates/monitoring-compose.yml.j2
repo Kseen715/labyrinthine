@@ -1,0 +1,48 @@
+services:
+
+  # ── Node Exporter – metrics for this monitoring server ────────────────────
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - '/:/host:ro,rslave'
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - /opt/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /var/lib/monitoring/prometheus/data:/prometheus
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    restart: always
+    network_mode: host
+    environment:
+      - GF_SERVER_HTTP_PORT={{ grafana_port }}
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - /var/lib/monitoring/grafana/data:/var/lib/grafana
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536

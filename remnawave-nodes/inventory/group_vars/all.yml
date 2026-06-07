@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# inventory/group_vars/all.yml
+# Variables shared by ALL hosts (nodes + monitoring).
+# =============================================================================
+
+# ── System user ──────────────────────────────────────────────────────────────
+# A non-root sudoer created on every managed host.
+system_user: "admin"
+# Generate: openssl rand -base64 24
+system_user_password: "1234test"
+
+# ── SSH ───────────────────────────────────────────────────────────────────────
+# Your public key is pushed to both root and system_user on every host.
+# Get:  cat ~/.ssh/id_ed25519.pub
+ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXkOJdqmKtALB+kM9RFhYfjJj2JDRAJliVEFSy0URua kseen"
+
+# ── Consul ────────────────────────────────────────────────────────────────────
+# Datacenter name – must be the same on server and all agents.
+consul_datacenter: "remnawave"
+
+# Optional gossip encryption key (leave empty to disable).
+# Generate: docker run --rm consul consul keygen
+consul_encrypt_key: ""
+
+# ── Performance tuning ───────────────────────────────────────────────────────
+enable_sysctl_optimization: true
+enable_swap: true
+enable_bbr: true
+
+# ── Feature flags ─────────────────────────────────────────────────────────────
+# Set to false in Molecule converge to skip docker-compose service launches.
+docker_services_enabled: true

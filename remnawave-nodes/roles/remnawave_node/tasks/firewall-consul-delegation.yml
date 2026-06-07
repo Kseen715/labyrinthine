@@ -1,0 +1,33 @@
+---
+# Called only when monitoring_hostname is non-empty (included via include_tasks).
+- name: Allow Consul API from this node on monitoring server
+  community.general.ufw:
+    rule: allow
+    port: "8500"
+    proto: tcp
+    src: "{{ ansible_default_ipv4.address }}"
+  delegate_to: "{{ monitoring_hostname }}"
+
+- name: Allow Consul RPC from this node on monitoring server
+  community.general.ufw:
+    rule: allow
+    port: "8300"
+    proto: tcp
+    src: "{{ ansible_default_ipv4.address }}"
+  delegate_to: "{{ monitoring_hostname }}"
+
+- name: Allow Consul serf LAN (TCP) from this node on monitoring server
+  community.general.ufw:
+    rule: allow
+    port: "8301"
+    proto: tcp
+    src: "{{ ansible_default_ipv4.address }}"
+  delegate_to: "{{ monitoring_hostname }}"
+
+- name: Allow Consul serf LAN (UDP) from this node on monitoring server
+  community.general.ufw:
+    rule: allow
+    port: "8301"
+    proto: udp
+    src: "{{ ansible_default_ipv4.address }}"
+  delegate_to: "{{ monitoring_hostname }}"

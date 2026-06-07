@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# molecule/monitoring/molecule.yml
+# Tests the common + remnawave_monitoring roles on Ubuntu 22.04.
+# Docker-compose service starts are skipped (docker_services_enabled: false)
+# because Docker-in-Docker is not reliable inside molecule containers.
+# The scenario verifies: packages, directories, config file rendering,
+# systemd services that *can* run inside a privileged container.
+# =============================================================================
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: monitoring
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /usr/sbin/init
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    groups:
+      - monitoring
+
+provisioner:
+  name: ansible
+  env:
+    TERM: dumb
+    DEBIAN_FRONTEND: noninteractive
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
+  config_options:
+    defaults:
+      stdout_callback: ansible.builtin.default
+      result_format: yaml
+      remote_tmp: /tmp/.ansible
+
+verifier:
+  name: ansible

@@ -1,0 +1,24 @@
+---
+# Deploy RemnaWave proxy nodes.
+# Requires SECRET_KEY in host_vars/<hostname>.yml for each node (from panel UI).
+#
+# Usage:
+#   ansible-playbook nodes.yml            # all nodes
+#   ansible-playbook nodes.yml --limit node1
+
+# Pre-gather monitoring server facts so hostvars[monitoring_hostname] has
+# ansible_default_ipv4 populated before any node firewall tasks run.
+- name: Gather monitoring server facts
+  hosts: monitoring
+  become: true
+  gather_facts: true
+  tasks: []
+
+- name: Deploy RemnaWave proxy nodes
+  hosts: nodes
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: common
+    - role: remnawave_node

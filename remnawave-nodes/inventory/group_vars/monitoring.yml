@@ -1,0 +1,58 @@
+---
+# =============================================================================
+# inventory/group_vars/monitoring.yml
+# Variables that apply to the monitoring server.
+# =============================================================================
+
+# ── Grafana ───────────────────────────────────────────────────────────────────
+grafana_port: 3000
+
+# ── RemnaWave panel metrics ───────────────────────────────────────────────────
+# Prometheus will scrape the panel's /metrics endpoint remotely.
+# Set to "" to disable panel metrics scraping.
+#
+# The panel backend (port 3001) must be reachable from the monitoring server.
+# You may need to allow this on the panel's firewall:
+#   ufw allow from <monitoring_ip> to any port 3001
+#
+# Example: "panel.example.com:3001"  or  "1.2.3.100:3001"
+remnawave_panel_metrics_target: ""
+
+# Credentials set in RemnaWave panel → Settings → Metrics (basic auth).
+prometheus_remnawave_username: "admin"
+# Plain-text password; stored in Prometheus config on the monitoring server.
+prometheus_remnawave_password: "1234test"
+
+# ── Node Exporter port ────────────────────────────────────────────────────────
+node_exporter_port: 9100
+
+# ── Caddy reverse proxy – public HTTPS access ─────────────────────────────────
+# All domains below must have A/AAAA records pointing to this server's IP.
+# Caddy automatically obtains and renews Let's Encrypt certificates.
+monitoring_caddy_enabled: true
+
+# Your email for Let's Encrypt certificate notifications.
+caddy_acme_email: "admin@atlas.gripe"
+
+# Grafana is served at this domain:
+grafana_domain: "grafana.atlas.gripe"
+
+# Prometheus is served at this domain:
+prometheus_domain: "prometheus.atlas.gripe"
+
+# Optional HTTP basic-auth in front of Prometheus (Grafana has its own login).
+# Leave prometheus_basic_auth_hash empty to skip basic-auth.
+# Generate the hash: caddy hash-password --plaintext <your_password>
+prometheus_basic_auth_user: "prometheus"
+prometheus_basic_auth_hash: "1234test"   # e.g. "$2a$14$..."
+
+# ── Combo mode – monitoring server that is ALSO a RemnaNode ──────────────────
+# When this server doubles as a proxy node, Caddy serves the SNI camouflage
+# page (connection templates) at this domain.
+# Set to "" if this server is a pure monitoring server.
+#
+# IMPORTANT: when remna_node_domain is set you must ALSO add to
+# inventory/host_vars/<this_host>.yml:
+#   caddy_enabled: false   ← prevents the remnawave_node role's own Caddy
+#                             from conflicting on port 443
+remna_node_domain: "tofu.atlas.gripe"   # e.g. "tofu.atlas.gripe"

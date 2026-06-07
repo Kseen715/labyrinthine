@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# molecule/monitoring/converge.yml
+# docker_services_enabled=false  → skips docker-compose up calls
+# skip_consul_delegation=true    → disables delegate_to in remnawave_node
+#                                  (not needed for monitoring scenario)
+# =============================================================================
+
+- name: Converge – monitoring server
+  hosts: monitoring
+  become: true
+  environment:
+    TERM: dumb
+    DEBIAN_FRONTEND: noninteractive
+
+  vars:
+    # System user – provide a dummy key so the task doesn't skip silently
+    system_user: "testadmin"
+    system_user_password: ""  # skip password-setting in molecule (SSH key auth only)
+    ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGtestkeytestkeytestkey molecule-test"
+
+    # Skip heavy optimisations that don't apply in a container
+    enable_sysctl_optimization: false
+    enable_swap: false
+    enable_bbr: false
+    enable_ufw_blacklist: false
+
+    # Don't start docker-compose services inside the molecule container
+    docker_services_enabled: false
+
+    # Monitoring-specific
+    grafana_port: 3000
+    prometheus_port: 9090
+    consul_datacenter: "remnawave"
+    consul_encrypt_key: ""
+
+    # Panel metrics disabled for the test
+    remnawave_panel_metrics_target: ""
+    prometheus_remnawave_username: "admin"
+    prometheus_remnawave_password: "testpassword"
+
+    node_exporter_port: 9100
+
+    # Fake monitoring server IP (molecule container itself)
+    monitoring_server_ip: "127.0.0.1"
+    monitoring_hostname: ""
+
+  roles:
+    - role: common
+    - role: remnawave_monitoring

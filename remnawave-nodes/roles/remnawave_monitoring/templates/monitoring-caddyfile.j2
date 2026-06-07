@@ -1,0 +1,34 @@
+{
+    # ACME (Let's Encrypt) email – required for certificate issuance notifications.
+    email {{ caddy_acme_email | default('') }}
+}
+
+# ── Grafana ──────────────────────────────────────────────────────────────────
+{% if grafana_domain | default('') | length > 0 %}
+{{ grafana_domain }} {
+    reverse_proxy localhost:{{ grafana_port }}
+}
+{% endif %}
+
+# ── Prometheus ───────────────────────────────────────────────────────────────
+{% if prometheus_domain | default('') | length > 0 %}
+{{ prometheus_domain }} {
+{% if prometheus_basic_auth_hash | default('') | length > 0 %}
+    basicauth {
+        # Generate: caddy hash-password --plaintext <your_password>
+        {{ prometheus_basic_auth_user | default('prometheus') }} {{ prometheus_basic_auth_hash }}
+    }
+{% endif %}
+    reverse_proxy localhost:{{ prometheus_port }}
+}
+{% endif %}
+
+# ── RemnaNode SNI camouflage page ────────────────────────────────────────────
+# Set remna_node_domain when this monitoring server also acts as a RemnaNode
+# endpoint. Clients download their connection templates from this domain.
+{% if remna_node_domain | default('') | length > 0 %}
+{{ remna_node_domain }} {
+    root * /srv/templates
+    file_server
+}
+{% endif %}

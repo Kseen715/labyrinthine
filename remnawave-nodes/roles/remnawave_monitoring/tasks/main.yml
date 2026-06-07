@@ -1,0 +1,17 @@
+---
+- name: Configure monitoring server firewall
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [firewall, remnawave_monitoring]
+
+- name: Deploy Consul Server
+  ansible.builtin.import_tasks: consul_server.yml
+  tags: [consul, consulserver, remnawave_monitoring]
+
+- name: Deploy Prometheus, Grafana and Node Exporter
+  ansible.builtin.import_tasks: monitoring_stack.yml
+  tags: [prometheus, grafana, node_exporter, remnawave_monitoring]
+
+- name: Deploy Caddy reverse proxy for SSL domain access
+  ansible.builtin.import_tasks: caddy.yml
+  when: monitoring_caddy_enabled | bool
+  tags: [caddy, remnawave_monitoring]

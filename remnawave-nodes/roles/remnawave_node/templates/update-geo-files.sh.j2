@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Weekly GEO file update for RemnaNode.
+set -euo pipefail
+
+DEST=/opt/remnanode
+GEO_BASE="https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release"
+ZAPRET_URL="https://github.com/kutovoys/ru_gov_zapret/releases/latest/download/zapret.dat"
+
+curl -sSf --max-time 60 "$GEO_BASE/geosite.dat" -o "$DEST/geosite_ru.dat"
+curl -sSf --max-time 60 "$GEO_BASE/geoip.dat"   -o "$DEST/geoip_ru.dat"
+curl -sSfL --max-time 60 "$ZAPRET_URL"           -o "$DEST/zapret.dat"
+
+docker compose -f "$DEST/docker-compose.yml" restart remnanode

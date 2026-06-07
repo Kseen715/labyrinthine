@@ -1,0 +1,22 @@
+---
+- name: Configure UFW rules for node ports
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [firewall, remnawave_node]
+
+- name: Deploy RemnaNode proxy
+  ansible.builtin.import_tasks: remnanode.yml
+  tags: [remnanode, remnawave_node]
+
+- name: Deploy Caddy (self-hosted page)
+  ansible.builtin.import_tasks: caddy.yml
+  tags: [caddy, remnawave_node]
+  when: caddy_enabled | bool
+
+- name: Deploy Node Exporter
+  ansible.builtin.import_tasks: node_exporter.yml
+  tags: [node_exporter, monitoring, remnawave_node]
+  when: inventory_hostname not in (groups['monitoring'] | default([]))
+
+- name: Deploy Consul Agent
+  ansible.builtin.import_tasks: consul_agent.yml
+  tags: [consul, consulagent, remnawave_node]

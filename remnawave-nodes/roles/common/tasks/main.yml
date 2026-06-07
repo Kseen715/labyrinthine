@@ -1,0 +1,35 @@
+---
+- name: Detect and set timezone
+  ansible.builtin.import_tasks: timezone.yml
+  tags: [timezone, common]
+
+- name: Create system user and configure SSH
+  ansible.builtin.import_tasks: users.yml
+  tags: [users, ssh, common]
+
+- name: Harden SSH and configure UFW
+  ansible.builtin.import_tasks: security.yml
+  tags: [security, ssh, firewall, common]
+
+- name: Install Docker
+  ansible.builtin.import_tasks: docker.yml
+  tags: [docker, common]
+  when: docker_install | bool
+
+- name: Optimize sysctl / kernel parameters
+  ansible.builtin.import_tasks: sysctl.yml
+  tags: [sysctl, optimization, common]
+  when: enable_sysctl_optimization | bool
+
+- name: Configure swap
+  ansible.builtin.import_tasks: swap.yml
+  tags: [swap, optimization, common]
+  when: enable_swap | bool
+
+- name: Configure logrotate and journald
+  ansible.builtin.import_tasks: logrotate.yml
+  tags: [logrotate, common]
+
+- name: Configure cron tasks
+  ansible.builtin.import_tasks: cron.yml
+  tags: [cron, common]

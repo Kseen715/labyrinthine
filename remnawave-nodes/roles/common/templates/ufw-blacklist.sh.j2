@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# UFW blacklist – fetches known RKN scanner networks and blocks them.
+set -euo pipefail
+
+BLOCKLIST_URL="https://raw.githubusercontent.com/im-on-github/rkn-blacklist/main/cidr.txt"
+TMP_FILE="$(mktemp)"
+
+curl -sSf --max-time 30 "$BLOCKLIST_URL" -o "$TMP_FILE" || { rm -f "$TMP_FILE"; exit 0; }
+
+while IFS= read -r cidr; do
+    [[ "$cidr" =~ ^#.*$ || -z "$cidr" ]] && continue
+    ufw insert 1 deny from "$cidr" to any || true
+done < "$TMP_FILE"
+
+rm -f "$TMP_FILE"

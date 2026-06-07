@@ -1,0 +1,13 @@
+services:
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/lib/remnawave/caddy/certificates:/data/caddy/certificates
+      - /var/lib/remnawave/caddy/config:/config/caddy
+{% if remna_node_domain | default('') | length > 0 %}
+      - ./templates:/srv/templates:ro
+{% endif %}

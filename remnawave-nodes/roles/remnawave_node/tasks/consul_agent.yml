@@ -1,0 +1,46 @@
+---
+- name: Create Consul Agent directory
+  ansible.builtin.file:
+    path: /opt/consul
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create Consul Agent service definitions directory
+  ansible.builtin.file:
+    path: /opt/consul/services
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create Consul Agent data directory
+  ansible.builtin.file:
+    path: /var/lib/remnawave/consul/agent/data
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Consul Agent docker-compose.yml
+  ansible.builtin.template:
+    src: consul-agent-compose.yml.j2
+    dest: /opt/consul/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy node-exporter service definition for Consul
+  ansible.builtin.template:
+    src: consul-service-node-exporter.json.j2
+    dest: /opt/consul/services/node-exporter.json
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start Consul Agent
+  community.docker.docker_compose_v2:
+    project_src: /opt/consul
+    state: present
+  when: docker_services_enabled | bool

@@ -1,0 +1,18 @@
+---
+# Deploy the central monitoring server:
+#   Consul Server  – service discovery for all nodes
+#   Prometheus     – metrics collection via Consul SD + static panel target
+#   Grafana        – visualisation
+#   Node Exporter  – host metrics for the monitoring server itself
+#
+# Usage:
+#   ansible-playbook monitoring.yml
+
+- name: Deploy RemnaWave monitoring server
+  hosts: monitoring
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: common
+    - role: remnawave_monitoring

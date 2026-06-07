@@ -1,0 +1,43 @@
+---
+# Localhost access for Prometheus ↔ Consul SD
+- name: Allow Consul API on localhost
+  community.general.ufw:
+    rule: allow
+    port: "8500"
+    proto: tcp
+    src: "127.0.0.1"
+
+# Open HTTP + HTTPS when Caddy handles public SSL domains.
+# HTTP (80) is required for ACME (Let's Encrypt) HTTP-01 challenges.
+- name: Allow HTTP for Let's Encrypt ACME challenge
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+  when: monitoring_caddy_enabled | bool
+
+- name: Allow HTTPS for Caddy reverse proxy
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+  when: monitoring_caddy_enabled | bool
+
+# Grafana is accessed via Caddy (HTTPS) when domains are configured.
+# Keep the direct port blocked from the internet by default.
+# Uncomment to expose Grafana directly (not recommended):
+# - name: Allow Grafana from everywhere
+#   community.general.ufw:
+#     rule: allow
+#     port: "{{ grafana_port | string }}"
+#     proto: tcp
+
+# Prometheus port – internal only (Caddy / Grafana calls 127.0.0.1:9090)
+# No external UFW rule needed.
+
+- name: Allow Node Exporter on localhost
+  community.general.ufw:
+    rule: allow
+    port: "{{ node_exporter_port | string }}"
+    proto: tcp
+    src: "127.0.0.1"

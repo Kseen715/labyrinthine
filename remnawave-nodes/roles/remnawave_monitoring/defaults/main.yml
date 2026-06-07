@@ -1,0 +1,49 @@
+---
+# ── Grafana ───────────────────────────────────────────────────────────────────
+grafana_port: 3000
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus_port: 9090
+
+# ── Consul Server ────────────────────────────────────────────────────────────
+consul_datacenter: "remnawave"
+consul_encrypt_key: ""
+
+# ── Panel metrics scraping ────────────────────────────────────────────────────
+# Set to "panel.example.com:3001" (or IP:port) to enable remote panel scraping.
+remnawave_panel_metrics_target: ""
+prometheus_remnawave_username: "admin"
+prometheus_remnawave_password: ""
+
+# ── Node Exporter ────────────────────────────────────────────────────────────
+node_exporter_port: 9100
+
+# ── Services ─────────────────────────────────────────────────────────────────
+docker_services_enabled: true
+
+# ── Caddy reverse proxy (SSL / domain access) ─────────────────────────────────
+# Set monitoring_caddy_enabled: true and configure the domains below to make
+# Grafana and Prometheus accessible via HTTPS public domains.
+monitoring_caddy_enabled: false
+
+# Email used by Let's Encrypt for certificate notifications.
+caddy_acme_email: ""
+
+# Public domain pointing to this server → Grafana UI
+grafana_domain: ""
+
+# Public domain pointing to this server → Prometheus UI
+prometheus_domain: ""
+
+# Optional HTTP basic-auth in front of Prometheus.
+# Generate hash: caddy hash-password --plaintext <your_password>
+# Leave prometheus_basic_auth_hash empty to disable basic-auth.
+prometheus_basic_auth_user: "prometheus"
+prometheus_basic_auth_hash: ""
+
+# Set only when this monitoring server is ALSO a RemnaNode endpoint.
+# Caddy will serve SNI connection templates at this domain (clients
+# download their proxy configuration from it).
+# When set, disable the node role's own Caddy: caddy_enabled: false
+# in inventory/host_vars/<monitoring_host>.yml
+remna_node_domain: ""

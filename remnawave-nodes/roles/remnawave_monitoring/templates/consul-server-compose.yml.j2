@@ -1,0 +1,24 @@
+{%- if consul_encrypt_key is defined and consul_encrypt_key | length > 0 -%}
+{%- set encrypt_arg = " -encrypt=" + consul_encrypt_key -%}
+{%- else -%}
+{%- set encrypt_arg = "" -%}
+{%- endif -%}
+services:
+  consul-server:
+    image: hashicorp/consul:1.21
+    container_name: consul-server
+    restart: unless-stopped
+    network_mode: host
+    command: >-
+      consul agent
+      -server
+      -ui
+      -node=server-1
+      -bootstrap-expect=1
+      -client=0.0.0.0
+      -bind={{ ansible_default_ipv4.address }}
+      -advertise={{ ansible_default_ipv4.address }}
+      -data-dir=/consul/data
+      -datacenter={{ consul_datacenter }}{{ encrypt_arg }}
+    volumes:
+      - /var/lib/remnawave/consul/server/data:/consul/data

@@ -1,0 +1,50 @@
+# =============================================================================
+# Prometheus configuration for RemnaWave monitoring.
+# Consul Server runs on this host → SD via 127.0.0.1:8500.
+# =============================================================================
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 30s
+
+scrape_configs:
+
+  # ── Monitoring server itself ───────────────────────────────────────────────
+  - job_name: 'monitoring_node'
+    static_configs:
+      - targets: ['127.0.0.1:{{ node_exporter_port }}']
+        labels:
+          instance: 'monitoring'
+
+  # ── All proxy nodes – discovered automatically via Consul ──────────────────
+  - job_name: 'node-exporter'
+    consul_sd_configs:
+      - server: '127.0.0.1:8500'
+        services: ['node-exporter']
+        datacenter: '{{ consul_datacenter }}'
+        scheme: 'http'
+        refresh_interval: 30s
+
+    relabel_configs:
+      # Use "<hostname>" as the instance label (set from Consul node name)
+      - source_labels: [__meta_consul_node]
+        target_label: instance
+      # Build the scrape target from the address and port registered in Consul
+      - source_labels: [__meta_consul_service_address, __meta_consul_service_port]
+        separator: ':'
+        target_label: __address__
+        replacement: '${1}:${2}'
+
+{% if remnawave_panel_metrics_target | length > 0 %}
+  # ── RemnaWave panel metrics (remote) ──────────────────────────────────────
+  # The panel backend must allow port 3001 from this server's IP.
+  - job_name: 'remnawave_panel'
+    metrics_path: '/metrics'
+    basic_auth:
+      username: '{{ prometheus_remnawave_username }}'
+      password: '{{ prometheus_remnawave_password }}'
+    static_configs:
+      - targets: ['{{ remnawave_panel_metrics_target }}']
+        labels:
+          instance: 'panel'
+{% endif %}

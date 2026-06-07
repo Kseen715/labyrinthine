@@ -1,0 +1,51 @@
+---
+- name: Create Caddy directory
+  ansible.builtin.file:
+    path: /opt/caddy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Select per-host Caddyfile or fall back to default
+  ansible.builtin.set_fact:
+    _caddyfile_template: >-
+      {{
+        lookup('first_found', [
+          role_path + '/templates/caddyfiles/' + inventory_hostname + '.j2',
+          role_path + '/templates/caddyfiles/default.j2'
+        ])
+      }}
+
+- name: Deploy Caddyfile
+  ansible.builtin.template:
+    src: "{{ _caddyfile_template }}"
+    dest: /opt/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart caddy
+
+- name: Deploy Caddy docker-compose.yml
+  ansible.builtin.template:
+    src: caddy-compose.yml.j2
+    dest: /opt/caddy/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart caddy
+
+- name: Clone SNI templates for Caddy camouflage
+  ansible.builtin.git:
+    repo: https://github.com/AndreyTimoschuk/sni-templates.git
+    dest: /opt/caddy/templates
+    version: HEAD
+    force: true
+    update: true
+  failed_when: false
+
+- name: Start Caddy
+  community.docker.docker_compose_v2:
+    project_src: /opt/caddy
+    state: present
+  when: docker_services_enabled | bool

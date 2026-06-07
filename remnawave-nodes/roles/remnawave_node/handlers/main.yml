@@ -1,0 +1,14 @@
+---
+- name: restart remnanode
+  community.docker.docker_compose_v2:
+    project_src: /opt/remnanode
+    state: present
+    recreate: always
+  when: docker_services_enabled | bool
+
+- name: restart caddy
+  community.docker.docker_compose_v2:
+    project_src: /opt/caddy
+    state: present
+    recreate: always
+  when: docker_services_enabled | bool

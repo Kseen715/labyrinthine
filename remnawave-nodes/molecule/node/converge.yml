@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# molecule/node/converge.yml
+# =============================================================================
+
+- name: Converge – proxy node
+  hosts: nodes
+  become: true
+  environment:
+    TERM: dumb
+    DEBIAN_FRONTEND: noninteractive
+
+  vars:
+    system_user: "testadmin"
+    system_user_password: ""  # skip password-setting in molecule (SSH key auth only)
+    ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGtestkeytestkeytestkey molecule-test"
+
+    enable_sysctl_optimization: false
+    enable_swap: false
+    enable_bbr: false
+    enable_ufw_blacklist: false
+
+    docker_services_enabled: false
+
+    # RemnaNode config
+    app_port: 2222
+    SECRET_KEY: "molecule_test_secret_key_1234567890abcdef"
+
+    # Caddy
+    caddy_enabled: true
+
+    # Consul Agent (no real server in this test)
+    consul_datacenter: "remnawave"
+    consul_encrypt_key: ""
+
+    # Monitoring (fake values – delegation is disabled via empty hostname)
+    monitoring_server_ip: "127.0.0.1"
+    monitoring_hostname: ""
+    node_exporter_port: 9100
+
+  roles:
+    - role: common
+    - role: remnawave_node

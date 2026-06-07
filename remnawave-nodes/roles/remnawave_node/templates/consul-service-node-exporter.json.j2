@@ -1,0 +1,14 @@
+{
+  "service": {
+    "id": "node-exporter-{{ inventory_hostname }}",
+    "name": "node-exporter",
+    "port": {{ node_exporter_port }},
+    "address": "{{ ansible_host }}",
+    "tags": ["prometheus"],
+    "check": {
+      "http": "http://{{ ansible_host }}:{{ node_exporter_port }}/metrics",
+      "interval": "30s",
+      "timeout": "5s"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# Default Caddyfile – serves SNI camouflage templates.
+# Create roles/remnawave_node/templates/caddyfiles/<hostname>.j2 to override
+# per node (e.g. with your own domain and static site).
+:443 {
+    root * /srv/templates
+    file_server
+    tls internal
+}

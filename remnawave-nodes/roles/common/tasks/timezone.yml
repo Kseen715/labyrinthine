@@ -1,0 +1,59 @@
+---
+- name: Probe timezone from ip-api.com
+  ansible.builtin.uri:
+    url: "http://ip-api.com/json/{{ ansible_host }}?fields=timezone"
+    method: GET
+    return_content: true
+    status_code: [200, 404]
+    timeout: 5
+  register: _tz_primary
+  failed_when: false
+  changed_when: false
+
+- name: Set timezone from primary API
+  ansible.builtin.set_fact:
+    _detected_tz: "{{ _tz_primary.json.timezone }}"
+  when:
+    - _tz_primary.status is defined
+    - _tz_primary.status == 200
+    - _tz_primary.json is defined
+    - _tz_primary.json.timezone is defined
+    - _tz_primary.json.timezone is search('/')
+
+- name: Probe timezone from ipapi.co (fallback)
+  ansible.builtin.uri:
+    url: "https://ipapi.co/{{ ansible_host }}/timezone/"
+    method: GET
+    return_content: true
+    status_code: [200, 404]
+    timeout: 5
+  register: _tz_fallback
+  failed_when: false
+  changed_when: false
+  when: _detected_tz is not defined
+
+- name: Set timezone from fallback API
+  ansible.builtin.set_fact:
+    _detected_tz: "{{ _tz_fallback.content | trim }}"
+  when:
+    - _detected_tz is not defined
+    - _tz_fallback.status is defined
+    - _tz_fallback.status == 200
+    - _tz_fallback.content is defined
+    - _tz_fallback.content | trim | length > 0
+    - _tz_fallback.content | trim is search('/')
+
+- name: Fall back to UTC when APIs are unreachable or returned invalid data
+  ansible.builtin.set_fact:
+    _detected_tz: "UTC"
+  when: _detected_tz is not defined
+
+- name: Install tzdata
+  ansible.builtin.apt:
+    name: tzdata
+    state: present
+    update_cache: true
+
+- name: "Set system timezone to {{ _detected_tz }}"
+  community.general.timezone:
+    name: "{{ _detected_tz }}"

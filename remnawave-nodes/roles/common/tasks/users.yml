@@ -1,0 +1,76 @@
+---
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Update /etc/hosts with hostname
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: "127.0.1.1 {{ inventory_hostname }}"
+    state: present
+    unsafe_writes: true
+
+- name: Create system user
+  ansible.builtin.user:
+    name: "{{ system_user }}"
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Ensure sudo is installed
+  ansible.builtin.apt:
+    name: sudo
+    state: present
+
+- name: Set password for system user
+  ansible.builtin.user:
+    name: "{{ system_user }}"
+    password: "{{ system_user_password | password_hash('sha512') }}"
+    update_password: on_create
+  when: system_user_password | default('') | length > 0
+  no_log: true
+
+- name: Add system user to sudo group
+  ansible.builtin.user:
+    name: "{{ system_user }}"
+    groups: sudo
+    append: true
+
+- name: Configure passwordless sudo for system user
+  ansible.builtin.lineinfile:
+    path: "/etc/sudoers.d/{{ system_user }}"
+    line: "{{ system_user }} ALL=(ALL) NOPASSWD:ALL"
+    create: true
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: Create .ssh directory for system user
+  ansible.builtin.file:
+    path: "/home/{{ system_user }}/.ssh"
+    state: directory
+    owner: "{{ system_user }}"
+    group: "{{ system_user }}"
+    mode: "0700"
+
+- name: Authorize SSH key for system user
+  ansible.posix.authorized_key:
+    user: "{{ system_user }}"
+    key: "{{ ssh_public_key }}"
+    state: present
+  when: ssh_public_key | length > 0
+
+- name: Ensure /root/.ssh exists
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Authorize SSH key for root
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ ssh_public_key }}"
+    state: present
+  when: ssh_public_key | length > 0

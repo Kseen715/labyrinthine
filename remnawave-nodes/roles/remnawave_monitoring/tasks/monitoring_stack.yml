@@ -1,0 +1,77 @@
+---
+- name: Create monitoring directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: /opt/monitoring }
+    - { path: /var/lib/monitoring/prometheus/data, owner: '65534', group: '65534' }
+    - { path: /var/lib/monitoring/grafana/data,    owner: '472',   group: '472'   }
+    - { path: /var/log/prometheus }
+    - { path: /var/log/grafana }
+
+- name: Fix Prometheus data directory ownership (idempotent)
+  ansible.builtin.file:
+    path: /var/lib/monitoring/prometheus/data
+    owner: '65534'
+    group: '65534'
+    recurse: true
+
+- name: Fix Grafana data directory ownership (idempotent)
+  ansible.builtin.file:
+    path: /var/lib/monitoring/grafana/data
+    owner: '472'
+    group: '472'
+    recurse: true
+
+- name: Deploy Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /opt/monitoring/prometheus.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart monitoring stack
+
+- name: Deploy monitoring docker-compose.yml
+  ansible.builtin.template:
+    src: monitoring-compose.yml.j2
+    dest: /opt/monitoring/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart monitoring stack
+
+- name: Start monitoring stack (Prometheus + Grafana + Node Exporter)
+  community.docker.docker_compose_v2:
+    project_src: /opt/monitoring
+    state: present
+  when: docker_services_enabled | bool
+
+- name: Wait for Prometheus
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ prometheus_port }}"
+    delay: 5
+    timeout: 60
+    state: started
+  when: docker_services_enabled | bool
+
+- name: Wait for Grafana
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ grafana_port }}"
+    delay: 5
+    timeout: 60
+    state: started
+  when: docker_services_enabled | bool
+
+- name: Print access information
+  ansible.builtin.debug:
+    msg:
+      - "Grafana:    {{ 'https://' + grafana_domain if (grafana_domain | default('') | length > 0) else 'http://' + ansible_host + ':' + grafana_port | string }}  (admin / admin – change immediately)"
+      - "Prometheus: {{ 'https://' + prometheus_domain if (prometheus_domain | default('') | length > 0) else 'http://' + ansible_host + ':' + prometheus_port | string }}"
+      - "Consul UI:  http://{{ ansible_host }}:8500  (localhost-only)"

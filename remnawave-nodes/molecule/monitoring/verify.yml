@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# molecule/monitoring/verify.yml
+# Assertions for the monitoring server scenario.
+# =============================================================================
+
+- name: Verify – monitoring server
+  hosts: monitoring
+  become: true
+
+  tasks:
+
+    # ── Common role ─────────────────────────────────────────────────────────
+    - name: Verify system user exists
+      ansible.builtin.command: "id testadmin"
+      changed_when: false
+
+    - name: Verify sudo without password is configured
+      ansible.builtin.stat:
+        path: /etc/sudoers.d/testadmin
+      register: _sudoers
+    - name: Assert sudoers file exists
+      ansible.builtin.assert:
+        that: _sudoers.stat.exists
+        fail_msg: "/etc/sudoers.d/testadmin not found"
+
+    - name: Verify UFW is installed
+      ansible.builtin.command: which ufw
+      changed_when: false
+
+    - name: Verify cron is installed
+      ansible.builtin.command: which cron
+      changed_when: false
+
+    - name: Verify logrotate is installed
+      ansible.builtin.command: which logrotate
+      changed_when: false
+
+    - name: Verify logrotate config is deployed
+      ansible.builtin.stat:
+        path: /etc/logrotate.d/remnawave
+      register: _logrotate
+    - name: Assert logrotate config exists
+      ansible.builtin.assert:
+        that: _logrotate.stat.exists
+        fail_msg: "/etc/logrotate.d/remnawave not found"
+
+    # ── remnawave_monitoring role ────────────────────────────────────────────
+    - name: Verify Consul Server directory exists
+      ansible.builtin.stat:
+        path: /opt/consul
+      register: _consul_dir
+    - name: Assert Consul Server directory
+      ansible.builtin.assert:
+        that: _consul_dir.stat.isdir
+        fail_msg: "/opt/consul directory not created"
+
+    - name: Verify Consul Server docker-compose.yml rendered
+      ansible.builtin.stat:
+        path: /opt/consul/docker-compose.yml
+      register: _consul_compose
+    - name: Assert Consul compose file exists
+      ansible.builtin.assert:
+        that: _consul_compose.stat.exists
+        fail_msg: "/opt/consul/docker-compose.yml not rendered"
+
+    - name: Verify Consul compose references correct datacenter
+      ansible.builtin.command: grep -q "remnawave" /opt/consul/docker-compose.yml
+      changed_when: false
+
+    - name: Verify monitoring directory exists
+      ansible.builtin.stat:
+        path: /opt/monitoring
+      register: _mon_dir
+    - name: Assert monitoring directory
+      ansible.builtin.assert:
+        that: _mon_dir.stat.isdir
+        fail_msg: "/opt/monitoring directory not created"
+
+    - name: Verify prometheus.yml rendered
+      ansible.builtin.stat:
+        path: /opt/monitoring/prometheus.yml
+      register: _prom_cfg
+    - name: Assert prometheus.yml exists
+      ansible.builtin.assert:
+        that: _prom_cfg.stat.exists
+        fail_msg: "/opt/monitoring/prometheus.yml not rendered"
+
+    - name: Verify prometheus.yml contains Consul SD config
+      ansible.builtin.command: grep -q "consul_sd_configs" /opt/monitoring/prometheus.yml
+      changed_when: false
+
+    - name: Verify prometheus.yml does NOT contain panel scrape job (target empty)
+      ansible.builtin.command: grep -qv "remnawave_panel" /opt/monitoring/prometheus.yml
+      changed_when: false
+      failed_when: false
+
+    - name: Verify monitoring docker-compose.yml rendered
+      ansible.builtin.stat:
+        path: /opt/monitoring/docker-compose.yml
+      register: _mon_compose
+    - name: Assert monitoring compose exists
+      ansible.builtin.assert:
+        that: _mon_compose.stat.exists
+        fail_msg: "/opt/monitoring/docker-compose.yml not rendered"
+
+    - name: Verify monitoring compose includes grafana
+      ansible.builtin.command: grep -qi "grafana" /opt/monitoring/docker-compose.yml
+      changed_when: false
+
+    - name: Verify monitoring compose includes prometheus
+      ansible.builtin.command: grep -qi "prometheus" /opt/monitoring/docker-compose.yml
+      changed_when: false
+
+    - name: Verify Prometheus data directory exists with correct owner
+      ansible.builtin.stat:
+        path: /var/lib/monitoring/prometheus/data
+      register: _prom_data
+    - name: Assert Prometheus data directory
+      ansible.builtin.assert:
+        that:
+          - _prom_data.stat.isdir
+          - _prom_data.stat.uid == 65534
+        fail_msg: "Prometheus data directory missing or wrong owner (expected uid 65534)"
+
+    - name: Verify Grafana data directory exists with correct owner
+      ansible.builtin.stat:
+        path: /var/lib/monitoring/grafana/data
+      register: _grafana_data
+    - name: Assert Grafana data directory
+      ansible.builtin.assert:
+        that:
+          - _grafana_data.stat.isdir
+          - _grafana_data.stat.uid == 472
+        fail_msg: "Grafana data directory missing or wrong owner (expected uid 472)"

@@ -1,0 +1,85 @@
+---
+- name: Disable IPv6 via sysctl
+  ansible.builtin.lineinfile:
+    path: /etc/sysctl.conf
+    regexp: "^{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - { regexp: 'net.ipv6.conf.all.disable_ipv6',     line: 'net.ipv6.conf.all.disable_ipv6 = 1' }
+    - { regexp: 'net.ipv6.conf.default.disable_ipv6', line: 'net.ipv6.conf.default.disable_ipv6 = 1' }
+
+- name: Apply network / performance sysctl tuning for Xray/VLESS
+  ansible.builtin.lineinfile:
+    path: /etc/sysctl.conf
+    regexp: "^{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    # File limits
+    - { regexp: 'fs.file-max',                               line: 'fs.file-max = 67108864' }
+    # Queue
+    - { regexp: 'net.core.default_qdisc',                    line: 'net.core.default_qdisc = fq' }
+    - { regexp: 'net.core.netdev_max_backlog',               line: 'net.core.netdev_max_backlog = 32768' }
+    - { regexp: 'net.core.optmem_max',                       line: 'net.core.optmem_max = 262144' }
+    - { regexp: 'net.core.somaxconn',                        line: 'net.core.somaxconn = 4096' }
+    # TCP buffers & congestion
+    - { regexp: 'net.ipv4.tcp_rmem',                         line: 'net.ipv4.tcp_rmem = 4096 131072 6291456' }
+    - { regexp: 'net.ipv4.tcp_wmem',                         line: 'net.ipv4.tcp_wmem = 4096 65536 6291456' }
+    - { regexp: 'net.ipv4.tcp_congestion_control',           line: 'net.ipv4.tcp_congestion_control = bbr' }
+    # Connections
+    - { regexp: 'net.ipv4.tcp_fin_timeout',                  line: 'net.ipv4.tcp_fin_timeout = 30' }
+    - { regexp: 'net.ipv4.tcp_syn_retries',                  line: 'net.ipv4.tcp_syn_retries = 5' }
+    - { regexp: 'net.ipv4.tcp_synack_retries',               line: 'net.ipv4.tcp_synack_retries = 4' }
+    - { regexp: 'net.ipv4.tcp_retries2',                     line: 'net.ipv4.tcp_retries2 = 12' }
+    - { regexp: 'net.ipv4.tcp_mtu_probing',                  line: 'net.ipv4.tcp_mtu_probing = 1' }
+    - { regexp: 'net.ipv4.tcp_sack',                         line: 'net.ipv4.tcp_sack = 1' }
+    - { regexp: 'net.ipv4.tcp_slow_start_after_idle',        line: 'net.ipv4.tcp_slow_start_after_idle = 0' }
+    - { regexp: 'net.ipv4.tcp_window_scaling',               line: 'net.ipv4.tcp_window_scaling = 1' }
+    - { regexp: 'net.ipv4.tcp_ecn',                          line: 'net.ipv4.tcp_ecn = 1' }
+    - { regexp: 'net.ipv4.tcp_max_tw_buckets',               line: 'net.ipv4.tcp_max_tw_buckets = 600000' }
+    - { regexp: 'net.ipv4.tcp_max_orphans',                  line: 'net.ipv4.tcp_max_orphans = 262144' }
+    - { regexp: 'net.ipv4.ip_local_port_range',              line: 'net.ipv4.ip_local_port_range = 1024 65535' }
+    # Conntrack
+    - { regexp: 'net.netfilter.nf_conntrack_max',                              line: 'net.netfilter.nf_conntrack_max = 262144' }
+    - { regexp: 'net.netfilter.nf_conntrack_tcp_timeout_established',          line: 'net.netfilter.nf_conntrack_tcp_timeout_established = 3600' }
+    - { regexp: 'net.netfilter.nf_conntrack_tcp_timeout_time_wait',            line: 'net.netfilter.nf_conntrack_tcp_timeout_time_wait = 120' }
+    # Anti-spoof / ICMP
+    - { regexp: 'net.ipv4.conf.all.rp_filter',               line: 'net.ipv4.conf.all.rp_filter = 2' }
+    - { regexp: 'net.ipv4.icmp_echo_ignore_broadcasts',      line: 'net.ipv4.icmp_echo_ignore_broadcasts = 1' }
+    - { regexp: 'net.ipv4.conf.all.send_redirects',          line: 'net.ipv4.conf.all.send_redirects = 0' }
+    - { regexp: 'net.ipv4.conf.all.accept_redirects',        line: 'net.ipv4.conf.all.accept_redirects = 0' }
+    - { regexp: 'net.ipv4.conf.all.log_martians',            line: 'net.ipv4.conf.all.log_martians = 1' }
+    # DDoS
+    - { regexp: 'net.ipv4.tcp_syncookies',                   line: 'net.ipv4.tcp_syncookies = 1' }
+    - { regexp: 'net.ipv4.tcp_max_syn_backlog',              line: 'net.ipv4.tcp_max_syn_backlog = 4096' }
+    # VM
+    - { regexp: 'vm.min_free_kbytes',                        line: 'vm.min_free_kbytes = 65536' }
+    - { regexp: 'vm.swappiness',                             line: 'vm.swappiness = 10' }
+    - { regexp: 'vm.dirty_ratio',                            line: 'vm.dirty_ratio = 20' }
+  notify: reload sysctl
+
+- name: Load BBR and nf_conntrack kernel modules
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - tcp_bbr
+    - nf_conntrack
+  failed_when: false
+  when: enable_bbr | bool
+
+- name: Persist kernel modules on boot
+  ansible.builtin.lineinfile:
+    path: /etc/modules-load.d/remnawave.conf
+    line: "{{ item }}"
+    create: true
+    state: present
+  loop:
+    - tcp_bbr
+    - nf_conntrack
+  when: enable_bbr | bool
+
+- name: Apply sysctl immediately
+  ansible.builtin.command: sysctl -p
+  changed_when: false

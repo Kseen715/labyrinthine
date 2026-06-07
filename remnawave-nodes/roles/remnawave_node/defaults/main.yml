@@ -1,0 +1,22 @@
+---
+# ── RemnaNode ─────────────────────────────────────────────────────────────────
+app_port: 2222
+SECRET_KEY: ""
+
+# ── Caddy ─────────────────────────────────────────────────────────────────────
+caddy_enabled: true
+
+# ── Consul Agent ──────────────────────────────────────────────────────────────
+consul_datacenter: "remnawave"
+consul_server_ip: "{{ monitoring_server_ip }}"
+consul_encrypt_key: ""
+
+# ── Node Exporter ────────────────────────────────────────────────────────────
+node_exporter_port: 9100
+
+# ── Monitoring server (for UFW delegation) ────────────────────────────────────
+monitoring_server_ip: ""
+monitoring_hostname: ""
+
+# ── Services ─────────────────────────────────────────────────────────────────
+docker_services_enabled: true
